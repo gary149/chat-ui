@@ -23,31 +23,18 @@
 		try {
 			loading = true;
 
-			// check if $settings.activeModel is a valid model
-			// else check if it's an assistant, and use that model
-			// else use the first model
-
 			const validModels = data.models.map((model) => model.id);
+			const activeModelIsValid = validModels.includes($settings.activeModel);
+			const modelToUse = activeModelIsValid ? $settings.activeModel : data.models[0].id;
 
-			let model;
-			if (validModels.includes($settings.activeModel)) {
-				model = $settings.activeModel;
-			} else {
-				if (data.assistant?.modelId && validModels.includes(data.assistant.modelId)) {
-					model = data.assistant.modelId;
-				} else {
-					model = data.models[0].id;
-				}
-			}
 			const res = await fetch(`${base}/conversation`, {
 				method: "POST",
 				headers: {
 					"Content-Type": "application/json",
 				},
 				body: JSON.stringify({
-					model,
-					preprompt: $settings.customPrompts[$settings.activeModel],
-					assistantId: data.assistant?._id,
+					model: modelToUse,
+					preprompt: $settings.customPrompts[modelToUse],
 				}),
 			});
 
@@ -83,12 +70,7 @@
 	});
 
 	let currentModel = $derived(
-		findCurrentModel(
-			[...data.models, ...data.oldModels],
-			!$settings.assistants.includes($settings.activeModel)
-				? $settings.activeModel
-				: data.assistant?.modelId
-		)
+		findCurrentModel([...data.models, ...data.oldModels], $settings.activeModel)
 	);
 </script>
 
@@ -99,7 +81,6 @@
 <ChatWindow
 	on:message={(ev) => createConversation(ev.detail)}
 	{loading}
-	assistant={data.assistant}
 	{currentModel}
 	models={data.models}
 	bind:files

@@ -12,7 +12,6 @@ import type { PreTrainedTokenizer } from "@huggingface/transformers";
 import JSON5 from "json5";
 import { getTokenizer } from "$lib/utils/getTokenizer";
 import { logger } from "$lib/server/logger";
-import { type ToolInput } from "$lib/types/Tool";
 import { fetchJSON } from "$lib/utils/fetchJSON";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -89,7 +88,6 @@ const modelConfig = z.object({
 		.optional(),
 	multimodal: z.boolean().default(false),
 	multimodalAcceptedMimetypes: z.array(z.string()).optional(),
-	tools: z.boolean().default(false),
 	unlisted: z.boolean().default(false),
 	embeddingModel: validateEmbeddingModelByName(embeddingModels).optional(),
 	/** Used to enable/disable system prompt usage */
@@ -197,7 +195,7 @@ async function getChatPromptRender(
 		process.exit();
 	}
 
-	const renderTemplate = ({ messages, preprompt, tools, continueMessage }: ChatTemplateInput) => {
+	const renderTemplate = ({ messages, preprompt, continueMessage }: ChatTemplateInput) => {
 		let formattedMessages: {
 			role: string;
 			content: string;
@@ -231,38 +229,9 @@ async function getChatPromptRender(
 			];
 		}
 
-		const mappedTools =
-			tools?.map((tool) => {
-				const inputs: Record<
-					string,
-					{
-						type: ToolInput["type"];
-						description: string;
-						required: boolean;
-					}
-				> = {};
-
-				for (const value of tool.inputs) {
-					if (value.paramType !== "fixed") {
-						inputs[value.name] = {
-							type: value.type,
-							description: value.description ?? "",
-							required: value.paramType === "required",
-						};
-					}
-				}
-
-				return {
-					name: tool.name,
-					description: tool.description,
-					parameter_definitions: inputs,
-				};
-			}) ?? [];
-
 		const output = tokenizer.apply_chat_template(formattedMessages, {
 			tokenize: false,
 			add_generation_prompt: !continueMessage,
-			tools: mappedTools.length ? mappedTools : undefined,
 		});
 
 		if (typeof output !== "string") {
@@ -407,5 +376,5 @@ export const taskModel = addEndpoint(
 
 export type BackendModel = Optional<
 	typeof defaultModel,
-	"preprompt" | "parameters" | "multimodal" | "unlisted" | "tools" | "hasInferenceAPI"
+	"preprompt" | "parameters" | "multimodal" | "unlisted" | "hasInferenceAPI"
 >;
