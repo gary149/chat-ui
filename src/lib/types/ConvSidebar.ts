@@ -3,6 +3,5 @@ export interface ConvSidebar {
 	title: string;
 	updatedAt: Date;
 	model?: string;
-	assistantId?: string;
 	avatarUrl?: string;
 }

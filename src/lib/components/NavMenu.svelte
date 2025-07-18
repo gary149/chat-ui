@@ -63,7 +63,7 @@
 			.then((res) => res.json())
 			.then((convs) =>
 				convs.map(
-					(conv: Pick<Conversation, "_id" | "title" | "updatedAt" | "model" | "assistantId">) => ({
+					(conv: Pick<Conversation, "_id" | "title" | "updatedAt" | "model">) => ({
 						...conv,
 						updatedAt: new Date(conv.updatedAt),
 					})
@@ -184,14 +184,6 @@
 				class="ml-auto rounded-full border border-gray-300 px-2 py-0.5 text-xs text-gray-500 dark:border-gray-500 dark:text-gray-400"
 				>{nModels}</span
 			>
-		</a>
-	{/if}
-	{#if $page.data.enableAssistants}
-		<a
-			href="{base}/assistants"
-			class="flex h-9 flex-none items-center gap-1.5 rounded-lg pl-2.5 pr-2 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700"
-		>
-			Assistants
 		</a>
 	{/if}
 	{#if $page.data.enableCommunityTools}

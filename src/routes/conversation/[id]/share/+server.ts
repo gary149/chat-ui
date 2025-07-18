@@ -41,7 +41,6 @@ export async function POST({ params, url, locals }) {
 		model: conversation.model,
 		embeddingModel: conversation.embeddingModel,
 		preprompt: conversation.preprompt,
-		assistantId: conversation.assistantId,
 	};
 
 	await collections.sharedConversations.insertOne(shared);

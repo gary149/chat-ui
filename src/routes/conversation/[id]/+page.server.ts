@@ -54,15 +54,6 @@ export const load = async ({ params, depends, locals }) => {
 		model: convertedConv.model,
 		preprompt: convertedConv.preprompt,
 		rootMessageId: convertedConv.rootMessageId,
-		assistant: convertedConv.assistantId
-			? JSON.parse(
-					JSON.stringify(
-						await collections.assistants.findOne({
-							_id: new ObjectId(convertedConv.assistantId),
-						})
-					)
-				)
-			: null,
 		shared,
 	};
 };

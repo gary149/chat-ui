@@ -2,12 +2,6 @@ import { runWebSearch } from "$lib/server/websearch/runWebSearch";
 import { preprocessMessages } from "../endpoints/preprocessMessages";
 
 import { generateTitleForConversation } from "./title";
-import {
-	assistantHasDynamicPrompt,
-	assistantHasWebSearch,
-	getAssistantById,
-	processPreprompt,
-} from "./assistant";
 import { getTools, runTools } from "./tools";
 import type { WebSearch } from "$lib/types/WebSearch";
 import {
@@ -53,8 +47,7 @@ async function* textGenerationWithoutTitle(
 		status: MessageUpdateStatus.Started,
 	};
 
-	ctx.assistant ??= await getAssistantById(ctx.conv.assistantId);
-	const { model, conv, messages, assistant, isContinue, webSearch, toolsPreference } = ctx;
+	const { model, conv, messages, isContinue, webSearch, toolsPreference } = ctx;
 	const convId = conv._id;
 
 	let webSearchResult: WebSearch | undefined;
@@ -62,19 +55,14 @@ async function* textGenerationWithoutTitle(
 	// run websearch if:
 	// - it's not continuing a previous message
 	// - AND the model doesn't support tools and websearch is selected
-	// - OR the assistant has websearch enabled (no tools for assistants for now)
-	if (!isContinue && ((webSearch && !conv.assistantId) || assistantHasWebSearch(assistant))) {
-		webSearchResult = yield* runWebSearch(conv, messages, assistant?.rag);
+	if (!isContinue && webSearch) {
+		webSearchResult = yield* runWebSearch(conv, messages);
 	}
 
 	let preprompt = conv.preprompt;
-	if (assistantHasDynamicPrompt(assistant) && preprompt) {
-		preprompt = await processPreprompt(preprompt, messages.at(-1)?.content);
-		if (messages[0].from === "system") messages[0].content = preprompt;
-	}
 
 	let toolResults: ToolResult[] = [];
-	let tools = model.tools ? await getTools(toolsPreference, ctx.assistant) : undefined;
+	let tools = model.tools ? await getTools(toolsPreference) : undefined;
 
 	if (tools) {
 		const toolCallsRequired = tools.some((tool) => !toolHasName(directlyAnswer.name, tool));

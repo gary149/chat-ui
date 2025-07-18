@@ -1,5 +1,4 @@
 import { config } from "$lib/server/config";
-import { startOfHour } from "date-fns";
 import { authCondition, requiresUser } from "$lib/server/auth";
 import { collections } from "$lib/server/database";
 import { models, validModelIdSchema } from "$lib/server/models";
@@ -450,7 +449,6 @@ export async function POST({ request, locals, params, getClientAddress }) {
 					endpoint: await model.getEndpoint(),
 					conv,
 					messages: messagesForPrompt,
-					assistant: undefined,
 					isContinue: isContinue ?? false,
 					webSearch: webSearch ?? false,
 					toolsPreference: [
@@ -500,14 +498,6 @@ export async function POST({ request, locals, params, getClientAddress }) {
 			);
 		},
 	});
-
-	if (conv.assistantId) {
-		await collections.assistantStats.updateOne(
-			{ assistantId: conv.assistantId, "date.at": startOfHour(new Date()), "date.span": "hour" },
-			{ $inc: { count: 1 } },
-			{ upsert: true }
-		);
-	}
 
 	const metrics = MetricsServer.getMetrics();
 	metrics.model.messagesTotal.inc({ model: model?.id });

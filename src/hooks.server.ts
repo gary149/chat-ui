@@ -13,7 +13,6 @@ import { AbortedGenerations } from "$lib/server/abortedGenerations";
 import { MetricsServer } from "$lib/server/metrics";
 import { initExitHandler } from "$lib/server/exitHandler";
 import { ObjectId } from "mongodb";
-import { refreshAssistantsCounts } from "$lib/jobs/refresh-assistants-counts";
 import { refreshConversationStats } from "$lib/jobs/refresh-conversation-stats";
 import { adminTokenManager } from "$lib/server/adminToken";
 
@@ -30,9 +29,6 @@ export const init: ServerInit = async () => {
 		initExitHandler();
 
 		checkAndRunMigrations();
-		if (config.ENABLE_ASSISTANTS) {
-			refreshAssistantsCounts();
-		}
 		refreshConversationStats();
 
 		// Init metrics server

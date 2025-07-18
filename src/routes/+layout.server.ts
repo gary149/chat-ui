@@ -21,8 +21,7 @@ export const load: LayoutServerLoad = async ({ locals, depends, fetch }) => {
 	// If the active model in settings is not valid, set it to the default model. This can happen if model was disabled.
 	if (
 		settings &&
-		!validateModel(models).safeParse(settings?.activeModel).success &&
-		!settings.assistants?.map((el) => el.toString())?.includes(settings?.activeModel)
+		!validateModel(models).safeParse(settings?.activeModel).success
 	) {
 		settings.activeModel = defaultModel.id;
 		await collections.settings.updateOne(authCondition(locals), {
@@ -41,16 +40,6 @@ export const load: LayoutServerLoad = async ({ locals, depends, fetch }) => {
 		});
 	}
 
-	const enableAssistants = config.ENABLE_ASSISTANTS === "true";
-
-	const assistantActive = !models.map(({ id }) => id).includes(settings?.activeModel ?? "");
-
-	const assistant = assistantActive
-		? await collections.assistants.findOne({
-				_id: new ObjectId(settings?.activeModel),
-			})
-		: null;
-
 	const nConversations = await collections.conversations.countDocuments(authCondition(locals));
 
 	const conversations =
@@ -60,29 +49,13 @@ export const load: LayoutServerLoad = async ({ locals, depends, fetch }) => {
 					.then((res) => res.json())
 					.then(
 						(
-							convs: Pick<Conversation, "_id" | "title" | "updatedAt" | "model" | "assistantId">[]
+							convs: Pick<Conversation, "_id" | "title" | "updatedAt" | "model">[]
 						) =>
 							convs.map((conv) => ({
 								...conv,
 								updatedAt: new Date(conv.updatedAt),
 							}))
 					);
-
-	const userAssistants = settings?.assistants?.map((assistantId) => assistantId.toString()) ?? [];
-	const userAssistantsSet = new Set(userAssistants);
-
-	const assistants = conversations.then((conversations) =>
-		collections.assistants
-			.find({
-				_id: {
-					$in: [
-						...userAssistants.map((el) => new ObjectId(el)),
-						...(conversations.map((conv) => conv.assistantId).filter((el) => !!el) as ObjectId[]),
-					],
-				},
-			})
-			.toArray()
-	);
 
 	const messagesBeforeLogin = config.MESSAGES_BEFORE_LOGIN
 		? parseInt(config.MESSAGES_BEFORE_LOGIN)
@@ -123,10 +96,6 @@ export const load: LayoutServerLoad = async ({ locals, depends, fetch }) => {
 		(key) => !configToolIds.includes(key)
 	);
 
-	if (assistant) {
-		activeCommunityToolIds = [...activeCommunityToolIds, ...(assistant.tools ?? [])];
-	}
-
 	const communityTools = await collections.tools
 		.find({ _id: { $in: activeCommunityToolIds.map((el) => new ObjectId(el)) } })
 		.toArray()
@@ -152,26 +121,11 @@ export const load: LayoutServerLoad = async ({ locals, depends, fetch }) => {
 						// remove invalid unicode and trim whitespaces
 						conv.title = conv.title.replace(/\uFFFD/gu, "").trimStart();
 
-						let avatarUrl: string | undefined = undefined;
-
-						if (conv.assistantId) {
-							const hash = (
-								await collections.assistants.findOne({
-									_id: new ObjectId(conv.assistantId),
-								})
-							)?.avatar;
-							if (hash) {
-								avatarUrl = `/settings/assistants/${conv.assistantId}/avatar.jpg?hash=${hash}`;
-							}
-						}
-
 						return {
 							id: conv._id.toString(),
 							title: conv.title,
 							model: conv.model ?? defaultModel,
 							updatedAt: conv.updatedAt,
-							assistantId: conv.assistantId?.toString(),
-							avatarUrl,
 						} satisfies ConvSidebar;
 					})
 				)
@@ -195,7 +149,6 @@ export const load: LayoutServerLoad = async ({ locals, depends, fetch }) => {
 				settings?.shareConversationsWithModelAuthors ??
 				DEFAULT_SETTINGS.shareConversationsWithModelAuthors,
 			customPrompts: settings?.customPrompts ?? {},
-			assistants: userAssistants,
 			tools:
 				settings?.tools ??
 				toolFromConfigs
@@ -254,17 +207,6 @@ export const load: LayoutServerLoad = async ({ locals, depends, fetch }) => {
 			type: "community",
 			review: ReviewStatus.APPROVED,
 		}),
-		assistants: assistants.then((assistants) =>
-			assistants
-				.filter((el) => userAssistantsSet.has(el._id.toString()))
-				.map((el) => ({
-					...el,
-					_id: el._id.toString(),
-					createdById: undefined,
-					createdByMe:
-						el.createdById.toString() === (locals.user?._id ?? locals.sessionId).toString(),
-				}))
-		),
 		user: locals.user && {
 			id: locals.user._id.toString(),
 			username: locals.user.username,
@@ -274,9 +216,6 @@ export const load: LayoutServerLoad = async ({ locals, depends, fetch }) => {
 			isEarlyAccess: locals.user.isEarlyAccess ?? false,
 		},
 		isAdmin: locals.isAdmin,
-		assistant: assistant ? JSON.parse(JSON.stringify(assistant)) : null,
-		enableAssistants,
-		enableAssistantsRAG: config.ENABLE_ASSISTANTS_RAG === "true",
 		enableCommunityTools: config.COMMUNITY_TOOLS === "true",
 		loginRequired,
 		loginEnabled: requiresUser,
