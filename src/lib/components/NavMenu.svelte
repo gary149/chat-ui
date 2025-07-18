@@ -1,10 +1,18 @@
+<script lang="ts" module>
+	export const titles: { [key: string]: string } = {
+		today: "Today",
+		week: "This week",
+		month: "This month",
+		older: "Older",
+	} as const;
+</script>
+
 <script lang="ts">
 	import { base } from "$app/paths";
 
 	import Logo from "$lib/components/icons/Logo.svelte";
 	import { switchTheme } from "$lib/switchTheme";
 	import { isAborted } from "$lib/stores/isAborted";
-	import { publicConfig } from "$lib/utils/PublicConfig.svelte";
 
 	import NavConversationItem from "./NavConversationItem.svelte";
 	import type { LayoutData } from "../../routes/$types";
@@ -12,9 +20,19 @@
 	import type { Model } from "$lib/types/Model";
 	import { page } from "$app/stores";
 	import InfiniteScroll from "./InfiniteScroll.svelte";
-	import type { Conversation } from "$lib/types/Conversation";
 	import { CONV_NUM_PER_PAGE } from "$lib/constants/pagination";
+	import { goto } from "$app/navigation";
 	import { browser } from "$app/environment";
+	import { toggleSearch } from "./chat/Search.svelte";
+	import CarbonSearch from "~icons/carbon/search";
+	import { closeMobileNav } from "./MobileNav.svelte";
+	import { usePublicConfig } from "$lib/utils/PublicConfig.svelte";
+
+	import { isVirtualKeyboard } from "$lib/utils/isVirtualKeyboard";
+	import { useAPIClient, handleResponse } from "$lib/APIClient";
+
+	const publicConfig = usePublicConfig();
+	const client = useAPIClient();
 
 	interface Props {
 		conversations: ConvSidebar[];
@@ -48,27 +66,18 @@
 		older: conversations.filter(({ updatedAt }) => updatedAt.getTime() < dateRanges[2]),
 	});
 
-	const titles: { [key: string]: string } = {
-		today: "Today",
-		week: "This week",
-		month: "This month",
-		older: "Older",
-	} as const;
-
 	const nModels: number = $page.data.models.filter((el: Model) => !el.unlisted).length;
 
 	async function handleVisible() {
 		p++;
-		const newConvs = await fetch(`${base}/api/conversations?p=${p}`)
-			.then((res) => res.json())
-			.then((convs) =>
-				convs.map(
-					(conv: Pick<Conversation, "_id" | "title" | "updatedAt" | "model">) => ({
-						...conv,
-						updatedAt: new Date(conv.updatedAt),
-					})
-				)
-			)
+		const newConvs = await client.conversations
+			.get({
+				query: {
+					p,
+				},
+			})
+			.then(handleResponse)
+			.then((r) => r.conversations)
 			.catch(() => []);
 
 		if (newConvs.length === 0) {
@@ -112,6 +121,21 @@
 <div
 	class="scrollbar-custom flex touch-pan-y flex-col gap-1 overflow-y-auto rounded-r-xl from-gray-50 px-3 pb-3 pt-2 text-[.9rem] dark:from-gray-800/30 max-sm:bg-gradient-to-t md:bg-gradient-to-l"
 >
+	<button
+		class="group mx-auto flex w-full flex-row items-center justify-stretch gap-x-2 rounded-xl px-2 py-1 align-middle text-gray-600 hover:bg-gray-500/20 dark:text-gray-400"
+		onclick={() => {
+			closeMobileNav();
+			toggleSearch();
+		}}
+	>
+		<CarbonSearch class="text-xs" />
+		<span class="block">Search chats</span>
+		{#if !isVirtualKeyboard()}
+			<span class="invisible ml-auto text-xs text-gray-500 group-hover:visible"
+				><kbd>ctrl</kbd>+<kbd>k</kbd></span
+			>
+		{/if}
+	</button>
 	{#await groupedConversations}
 		{#if $page.data.nConversations > 0}
 			<div class="overflow-y-hidden">
@@ -145,9 +169,13 @@
 	class="flex touch-none flex-col gap-1 rounded-r-xl p-3 text-sm md:mt-3 md:bg-gradient-to-l md:from-gray-50 md:dark:from-gray-800/30"
 >
 	{#if user?.username || user?.email}
-		<form
-			action="{base}/logout"
-			method="post"
+		<button
+			onclick={async () => {
+				await fetch(`${base}/logout`, {
+					method: "POST",
+				});
+				await goto(base + "/", { invalidateAll: true });
+			}}
 			class="group flex items-center gap-1.5 rounded-lg pl-2.5 pr-2 hover:bg-gray-100 dark:hover:bg-gray-700"
 		>
 			<span
@@ -155,24 +183,21 @@
 				>{user?.username || user?.email}</span
 			>
 			{#if !user.logoutDisabled}
-				<button
-					type="submit"
+				<span
 					class="ml-auto h-6 flex-none items-center gap-1.5 rounded-md border bg-white px-2 text-gray-700 shadow-sm group-hover:flex hover:shadow-none dark:border-gray-600 dark:bg-gray-600 dark:text-gray-400 dark:hover:text-gray-300 md:hidden"
 				>
 					Sign Out
-				</button>
+				</span>
 			{/if}
-		</form>
+		</button>
 	{/if}
 	{#if canLogin}
-		<form action="{base}/login" method="POST" target="_parent">
-			<button
-				type="submit"
-				class="flex h-9 w-full flex-none items-center gap-1.5 rounded-lg pl-2.5 pr-2 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700"
-			>
-				Login
-			</button>
-		</form>
+		<a
+			href="{base}/login"
+			class="flex h-9 w-full flex-none items-center gap-1.5 rounded-lg pl-2.5 pr-2 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700"
+		>
+			Login
+		</a>
 	{/if}
 	{#if nModels > 1}
 		<a
@@ -212,7 +237,7 @@
 				theme = localStorage.theme;
 			}}
 			aria-label="Toggle theme"
-			class="flex h-9 min-w-[1.5em] flex-none items-center rounded-lg p-2 pr-0 pr-2 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700"
+			class="flex h-9 min-w-[1.5em] flex-none items-center rounded-lg p-2 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700"
 		>
 			{#if browser}
 				{#if theme === "dark"}

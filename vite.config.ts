@@ -21,7 +21,9 @@ function loadTTFAsArrayBuffer() {
 	};
 }
 const isViteNode = process.argv.some((arg) => arg.includes("vite-node")) || !!process.env.VITE_NODE;
-const shouldCopyLlama = process.env.npm_lifecycle_event === "build" && !isViteNode; // Copy node-llama-cpp/llama files to build output
+const skipLlamaCppBuild = process.env.SKIP_LLAMA_CPP_BUILD === "true";
+const shouldCopyLlama =
+	process.env.npm_lifecycle_event === "build" && !isViteNode && !skipLlamaCppBuild; // Copy node-llama-cpp/llama files to build output
 
 function copyLlamaFiles() {
 	return {
@@ -92,13 +94,44 @@ export default defineConfig({
 	optimizeDeps: {
 		include: ["uuid", "@huggingface/transformers", "sharp", "@gradio/client", "clsx"],
 	},
-	server: {
-		open: "/",
-	},
 	test: {
-		setupFiles: ["./scripts/setupTest.ts"],
-		deps: { inline: ["@sveltejs/kit"] },
-		globals: true,
-		testTimeout: 10000,
+		workspace: [
+			{
+				// Client-side tests (Svelte components)
+				extends: "./vite.config.ts",
+				test: {
+					name: "client",
+					environment: "browser",
+					browser: {
+						enabled: true,
+						provider: "playwright",
+						instances: [{ browser: "chromium", headless: true }],
+					},
+					include: ["src/**/*.svelte.{test,spec}.{js,ts}"],
+					exclude: ["src/lib/server/**", "src/**/*.ssr.{test,spec}.{js,ts}"],
+					setupFiles: ["./scripts/setups/vitest-setup-client.ts"],
+				},
+			},
+			{
+				// SSR tests (Server-side rendering)
+				extends: "./vite.config.ts",
+				test: {
+					name: "ssr",
+					environment: "node",
+					include: ["src/**/*.ssr.{test,spec}.{js,ts}"],
+				},
+			},
+			{
+				// Server-side tests (Node.js utilities)
+				extends: "./vite.config.ts",
+				test: {
+					name: "server",
+					environment: "node",
+					include: ["src/**/*.{test,spec}.{js,ts}"],
+					exclude: ["src/**/*.svelte.{test,spec}.{js,ts}", "src/**/*.ssr.{test,spec}.{js,ts}"],
+					setupFiles: ["./scripts/setups/vitest-setup-server.ts"],
+				},
+			},
+		],
 	},
 });

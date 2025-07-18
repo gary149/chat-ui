@@ -1,6 +1,5 @@
 import { env as publicEnv } from "$env/dynamic/public";
 import { env as serverEnv } from "$env/dynamic/private";
-import { publicConfig } from "$lib/utils/PublicConfig.svelte";
 import { building } from "$app/environment";
 import type { Collection } from "mongodb";
 import type { ConfigKey as ConfigKeyType } from "$lib/types/ConfigKey";
@@ -27,11 +26,8 @@ class ConfigManager {
 			return;
 		}
 
-		const { collections, ready } = await import("./database");
-		await ready;
-		if (!collections) {
-			throw new Error("Database not initialized");
-		}
+		const { getCollectionsEarly } = await import("./database");
+		const collections = await getCollectionsEarly();
 
 		this.configCollection = collections.config;
 		this.semaphoreCollection = collections.semaphores;
@@ -151,9 +147,7 @@ const configManager = new ConfigManager();
 
 export const ready = (async () => {
 	if (!building) {
-		await configManager.init().then(() => {
-			publicConfig.init(configManager.getPublicConfig());
-		});
+		await configManager.init();
 	}
 })();
 

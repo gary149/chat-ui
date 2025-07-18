@@ -25,7 +25,10 @@
 	import { useSettingsStore } from "$lib/stores/settings.js";
 	import { browser } from "$app/environment";
 
+	import type { TreeNode, TreeId } from "$lib/utils/tree/tree";
 	import "katex/dist/katex.min.css";
+	import { updateDebouncer } from "$lib/utils/updates.js";
+	import { documentParserToolId } from "$lib/utils/toolIds.js";
 
 	let { data = $bindable() } = $props();
 
@@ -40,7 +43,7 @@
 		conversations = data.conversations;
 	});
 
-	function createMessagesPath(messages: Message[], msgId?: Message["id"]): Message[] {
+	function createMessagesPath<T>(messages: TreeNode<T>[], msgId?: TreeId): TreeNode<T>[] {
 		if (initialRun) {
 			if (!msgId && page.url.searchParams.get("leafId")) {
 				msgId = page.url.searchParams.get("leafId") as string;
@@ -83,7 +86,7 @@
 		return path;
 	}
 
-	function createMessagesAlternatives(messages: Message[]): Message["id"][][] {
+	function createMessagesAlternatives<T>(messages: TreeNode<T>[]): TreeId[][] {
 		const alternatives = [];
 		for (const message of messages) {
 			if (message.children?.length) {
@@ -217,8 +220,6 @@
 						from: "user",
 						content: prompt ?? "",
 						files: base64Files,
-						createdAt: new Date(),
-						updatedAt: new Date(),
 					},
 					messageId
 				);
@@ -235,8 +236,6 @@
 					{
 						from: "assistant",
 						content: "",
-						createdAt: new Date(),
-						updatedAt: new Date(),
 					},
 					newUserMessageId
 				);
@@ -249,6 +248,13 @@
 			}
 
 			const messageUpdatesAbortController = new AbortController();
+
+			let tools = $settings.tools;
+
+			if (!files.some((file) => file.type.startsWith("application/"))) {
+				tools = $settings.tools?.filter((tool) => tool !== documentParserToolId);
+			}
+
 			const messageUpdatesIterator = await fetchMessageUpdates(
 				page.params.id,
 				{
@@ -258,7 +264,7 @@
 					isRetry,
 					isContinue,
 					webSearch: !activeModel.tools && $webSearchParameters.useSearch,
-					tools: $settings.tools, // preference for tools
+					tools,
 					files: isRetry ? userMessage?.files : base64Files,
 				},
 				messageUpdatesAbortController.signal
@@ -268,6 +274,12 @@
 			if (messageUpdatesIterator === undefined) return;
 
 			files = [];
+			let buffer = "";
+			// Initialize lastUpdateTime outside the loop to persist between updates
+			let lastUpdateTime = new Date();
+
+			let reasoningBuffer = "";
+			let reasoningLastUpdate = new Date();
 
 			for await (const update of messageUpdatesIterator) {
 				if ($isAborted) {
@@ -281,10 +293,6 @@
 					update.token = update.token.replaceAll("\0", "");
 				}
 
-				// dont write updates for reasoning stream and normal stream to reduce render load
-				// but handle the rest
-
-				// Skip storing high-frequency updates to reduce render load
 				const isHighFrequencyUpdate =
 					(update.type === MessageUpdateType.Reasoning &&
 						update.subtype === MessageReasoningUpdateType.Stream) ||
@@ -295,9 +303,16 @@
 				if (!isHighFrequencyUpdate) {
 					messageToWriteTo.updates = [...(messageToWriteTo.updates ?? []), update];
 				}
+				const currentTime = new Date();
 
 				if (update.type === MessageUpdateType.Stream && !$settings.disableStream) {
-					messageToWriteTo.content += update.token;
+					buffer += update.token;
+					// Check if this is the first update or if enough time has passed
+					if (currentTime.getTime() - lastUpdateTime.getTime() > updateDebouncer.maxUpdateTime) {
+						messageToWriteTo.content += buffer;
+						buffer = "";
+						lastUpdateTime = currentTime;
+					}
 					pending = false;
 				} else if (
 					update.type === MessageUpdateType.Status &&
@@ -324,7 +339,15 @@
 						messageToWriteTo.reasoning = "";
 					}
 					if (update.subtype === MessageReasoningUpdateType.Stream) {
-						messageToWriteTo.reasoning += update.token;
+						reasoningBuffer += update.token;
+						if (
+							currentTime.getTime() - reasoningLastUpdate.getTime() >
+							updateDebouncer.maxUpdateTime
+						) {
+							messageToWriteTo.reasoning += reasoningBuffer;
+							reasoningBuffer = "";
+							reasoningLastUpdate = currentTime;
+						}
 					}
 				}
 			}
@@ -481,7 +504,7 @@
 <ChatWindow
 	{loading}
 	{pending}
-	messages={messagesPath}
+	messages={messagesPath as Message[]}
 	{messagesAlternatives}
 	shared={data.shared}
 	preprompt={data.preprompt}
@@ -492,7 +515,21 @@
 	on:showAlternateMsg={onShowAlternateMsg}
 	on:vote={(event) => voteMessage(event.detail.score, event.detail.id)}
 	on:share={() => shareConversation(page.params.id, data.title)}
-	on:stop={() => (($isAborted = true), (loading = false))}
+	on:stop={async () => {
+		await fetch(`${base}/conversation/${page.params.id}/stop-generating`, {
+			method: "POST",
+		}).then((r) => {
+			if (r.ok) {
+				setTimeout(() => {
+					$isAborted = true;
+					loading = false;
+				}, 3000);
+			} else {
+				$isAborted = true;
+				loading = false;
+			}
+		});
+	}}
 	models={data.models}
 	currentModel={findCurrentModel([...data.models, ...data.oldModels], data.model)}
 />

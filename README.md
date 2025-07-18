@@ -847,6 +847,14 @@ MODELS=`[
 
 ```
 
+### Model Context Protocol (MCP) Support (Upcoming)
+
+The project is planning to introduce support for the Model Context Protocol (MCP). MCP is a specification designed to standardize how language models receive and understand context from various sources. This will enable more flexible and powerful integrations, allowing models to seamlessly access and utilize a broader range of information, such as user history, external documents, or real-time data, in a structured way.
+
+This is an upcoming feature, and we believe it will significantly enhance the capabilities and extensibility of Chat UI.
+
+We are actively seeking contributions from the community to help design, implement, and integrate MCP support into Chat UI. If you are interested in shaping the future of how Chat UI handles model context and want to contribute to this exciting development, please look for issues tagged with 'MCP' or 'Model Context Protocol' on our issue tracker. Your expertise and input would be invaluable!
+
 ### Custom endpoint authorization
 
 #### Basic and Bearer
@@ -1098,15 +1106,15 @@ You can build the docker images locally using the following commands:
 ```bash
 docker build -t chat-ui-db:latest --build-arg INCLUDE_DB=true .
 docker build -t chat-ui:latest --build-arg INCLUDE_DB=false .
-docker build -t huggingchat:latest --build-arg INCLUDE_DB=false --build-arg APP_BASE=/chat --build-arg PUBLIC_APP_COLOR=yellow .
+docker build -t huggingchat:latest --build-arg INCLUDE_DB=false --build-arg APP_BASE=/chat --build-arg PUBLIC_APP_COLOR=yellow --build-arg SKIP_LLAMA_CPP_BUILD=true .
 ```
 
 If you want to run the images with your local .env.local you have two options
 
 ```bash
-DOTENV_LOCAL=$(<.env.local)  docker run --rm --network=host -e DOTENV_LOCAL -p 3000:3000 chat-ui
+DOTENV_LOCAL=$(<.env.local)  docker run --network=host -e DOTENV_LOCAL chat-ui-db
 ```
 
 ```bash
-docker run --rm --network=host --mount type=bind,source="$(pwd)/.env.local",target=/app/.env.local -p 3000:3000 chat-ui
+docker run --network=host --mount type=bind,source="$(pwd)/.env.local",target=/app/.env.local chat-ui-db
 ```

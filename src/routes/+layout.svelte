@@ -6,8 +6,6 @@
 	import { base } from "$app/paths";
 	import { page } from "$app/stores";
 
-	import { publicConfig } from "$lib/utils/PublicConfig.svelte";
-
 	import { error } from "$lib/stores/errors";
 	import { createSettingsStore } from "$lib/stores/settings";
 
@@ -22,8 +20,16 @@
 	import { loginModalOpen } from "$lib/stores/loginModal";
 	import LoginModal from "$lib/components/LoginModal.svelte";
 	import OverloadedModal from "$lib/components/OverloadedModal.svelte";
+	import Search from "$lib/components/chat/Search.svelte";
+	import { setContext } from "svelte";
+	import { handleResponse, useAPIClient } from "$lib/APIClient";
 
 	let { data = $bindable(), children } = $props();
+
+	setContext("publicConfig", data.publicConfig);
+
+	const publicConfig = data.publicConfig;
+	const client = useAPIClient();
 
 	let conversations = $state(data.conversations);
 	$effect(() => {
@@ -57,50 +63,35 @@
 	}
 
 	async function deleteConversation(id: string) {
-		try {
-			const res = await fetch(`${base}/conversation/${id}`, {
-				method: "DELETE",
-				headers: {
-					"Content-Type": "application/json",
-				},
+		client
+			.conversations({ id })
+			.delete()
+			.then(handleResponse)
+			.then(async () => {
+				conversations = conversations.filter((conv) => conv.id !== id);
+
+				if ($page.params.id === id) {
+					await goto(`${base}/`, { invalidateAll: true });
+				}
+			})
+			.catch((err) => {
+				console.error(err);
+				$error = String(err);
 			});
-
-			if (!res.ok) {
-				$error = "Error while deleting conversation, try again.";
-				return;
-			}
-
-			conversations = conversations.filter((conv) => conv.id !== id);
-
-			if ($page.params.id === id) {
-				await goto(`${base}/`, { invalidateAll: true });
-			}
-		} catch (err) {
-			console.error(err);
-			$error = String(err);
-		}
 	}
 
 	async function editConversationTitle(id: string, title: string) {
-		try {
-			const res = await fetch(`${base}/conversation/${id}`, {
-				method: "PATCH",
-				headers: {
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify({ title }),
+		client
+			.conversations({ id })
+			.patch({ title })
+			.then(handleResponse)
+			.then(async () => {
+				conversations = conversations.map((conv) => (conv.id === id ? { ...conv, title } : conv));
+			})
+			.catch((err) => {
+				console.error(err);
+				$error = String(err);
 			});
-
-			if (!res.ok) {
-				$error = "Error while editing title, try again.";
-				return;
-			}
-
-			conversations = conversations.map((conv) => (conv.id === id ? { ...conv, title } : conv));
-		} catch (err) {
-			console.error(err);
-			$error = String(err);
-		}
 	}
 
 	onDestroy(() => {
@@ -180,14 +171,6 @@
 			publicConfig.PUBLIC_APP_DISCLAIMER === "1" &&
 			!($page.data.shared === true)
 	);
-
-	$effect.pre(() => {
-		publicConfig.init(data.publicConfig);
-	});
-
-	onMount(() => {
-		publicConfig.init(data.publicConfig);
-	});
 </script>
 
 <svelte:head>
@@ -202,35 +185,13 @@
 		<meta property="og:title" content={publicConfig.PUBLIC_APP_NAME} />
 		<meta property="og:type" content="website" />
 		<meta property="og:url" content="{publicConfig.PUBLIC_ORIGIN || $page.url.origin}{base}" />
-		<meta
-			property="og:image"
-			content="{publicConfig.PUBLIC_ORIGIN ||
-				$page.url.origin}{base}/{publicConfig.PUBLIC_APP_ASSETS}/thumbnail.png"
-		/>
+		<meta property="og:image" content="{publicConfig.assetPath}/thumbnail.png" />
 		<meta property="og:description" content={publicConfig.PUBLIC_APP_DESCRIPTION} />
 	{/if}
-	<link
-		rel="icon"
-		href="{publicConfig.PUBLIC_ORIGIN ||
-			$page.url.origin}{base}/{publicConfig.PUBLIC_APP_ASSETS}/favicon.ico"
-		sizes="32x32"
-	/>
-	<link
-		rel="icon"
-		href="{publicConfig.PUBLIC_ORIGIN ||
-			$page.url.origin}{base}/{publicConfig.PUBLIC_APP_ASSETS}/icon.svg"
-		type="image/svg+xml"
-	/>
-	<link
-		rel="apple-touch-icon"
-		href="{publicConfig.PUBLIC_ORIGIN ||
-			$page.url.origin}{base}/{publicConfig.PUBLIC_APP_ASSETS}/apple-touch-icon.png"
-	/>
-	<link
-		rel="manifest"
-		href="{publicConfig.PUBLIC_ORIGIN ||
-			$page.url.origin}{base}/{publicConfig.PUBLIC_APP_ASSETS}/manifest.json"
-	/>
+	<link rel="icon" href="{publicConfig.assetPath}/favicon.ico" sizes="32x32" />
+	<link rel="icon" href="{publicConfig.assetPath}/icon.svg" type="image/svg+xml" />
+	<link rel="apple-touch-icon" href="{publicConfig.assetPath}/apple-touch-icon.png" />
+	<link rel="manifest" href="{publicConfig.assetPath}/manifest.json" />
 
 	{#if publicConfig.PUBLIC_PLAUSIBLE_SCRIPT_URL && publicConfig.PUBLIC_ORIGIN}
 		<script
@@ -261,6 +222,8 @@
 	<OverloadedModal onClose={() => (overloadedModalOpen = false)} />
 {/if}
 
+<Search />
+
 <div
 	class="fixed grid h-full w-screen grid-cols-1 grid-rows-[auto,1fr] overflow-hidden text-smd {!isNavCollapsed
 		? 'md:grid-cols-[290px,1fr]'
@@ -278,7 +241,7 @@
 		<NavMenu
 			{conversations}
 			user={data.user}
-			canLogin={data.user === undefined && data.loginEnabled}
+			canLogin={!data.user && data.loginEnabled}
 			on:shareConversation={(ev) => shareConversation(ev.detail.id, ev.detail.title)}
 			on:deleteConversation={(ev) => deleteConversation(ev.detail)}
 			on:editConversationTitle={(ev) => editConversationTitle(ev.detail.id, ev.detail.title)}
@@ -290,7 +253,7 @@
 		<NavMenu
 			{conversations}
 			user={data.user}
-			canLogin={data.user === undefined && data.loginEnabled}
+			canLogin={!data.user && data.loginEnabled}
 			on:shareConversation={(ev) => shareConversation(ev.detail.id, ev.detail.title)}
 			on:deleteConversation={(ev) => deleteConversation(ev.detail)}
 			on:editConversationTitle={(ev) => editConversationTitle(ev.detail.id, ev.detail.title)}

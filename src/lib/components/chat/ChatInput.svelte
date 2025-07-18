@@ -1,6 +1,5 @@
 <script lang="ts">
-	import { browser } from "$app/environment";
-	import { createEventDispatcher, onMount } from "svelte";
+	import { createEventDispatcher, onMount, tick } from "svelte";
 
 	import HoverTooltip from "$lib/components/HoverTooltip.svelte";
 	import IconInternet from "$lib/components/icons/IconInternet.svelte";
@@ -24,6 +23,7 @@
 	import IconScreenshot from "../icons/IconScreenshot.svelte";
 	import { loginModalOpen } from "$lib/stores/loginModal";
 
+	import { isVirtualKeyboard } from "$lib/utils/isVirtualKeyboard";
 	interface Props {
 		files?: File[];
 		mimeTypes?: string[];
@@ -35,6 +35,7 @@
 		modelIsMultimodal?: boolean;
 		children?: import("svelte").Snippet;
 		onPaste?: (e: ClipboardEvent) => void;
+		focused?: boolean;
 	}
 
 	let {
@@ -48,6 +49,7 @@
 		modelIsMultimodal = false,
 		children,
 		onPaste,
+		focused = $bindable(false),
 	}: Props = $props();
 
 	const onFileChange = async (e: Event) => {
@@ -82,21 +84,6 @@
 		};
 	});
 
-	function isVirtualKeyboard(): boolean {
-		if (!browser) return false;
-
-		// Check for touch capability
-		if (navigator.maxTouchPoints > 0) return true;
-
-		// Check for touch events
-		if ("ontouchstart" in window) return true;
-
-		// Fallback to user agent string check
-		const userAgent = navigator.userAgent.toLowerCase();
-
-		return /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent);
-	}
-
 	function adjustTextareaHeight() {
 		if (!textareaElement) {
 			return;
@@ -119,6 +106,8 @@
 			value.trim() !== ""
 		) {
 			event.preventDefault();
+			adjustTextareaHeight();
+			tick();
 			dispatch("submit");
 		}
 	}
@@ -177,6 +166,8 @@
 		}}
 		{placeholder}
 		{disabled}
+		onfocus={() => (focused = true)}
+		onblur={() => (focused = false)}
 	></textarea>
 
 	{#if !showNoTools}
@@ -360,5 +351,6 @@
 		font-family: inherit;
 		box-sizing: border-box;
 		line-height: 1.5;
+		font-size: 16px;
 	}
 </style>

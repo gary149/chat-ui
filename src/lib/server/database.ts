@@ -64,12 +64,14 @@ export class Database {
 			});
 		}
 
-		this.client.connect().catch((err) => {
+		try {
+			await this.client.connect();
+			this.client.db(config.MONGODB_DB_NAME + (import.meta.env.MODE === "test" ? "-test" : ""));
+			this.client.on("open", () => this.initDatabase());
+		} catch (err) {
 			logger.error(err, "Connection error");
 			process.exit(1);
-		});
-		this.client.db(config.MONGODB_DB_NAME + (import.meta.env.MODE === "test" ? "-test" : ""));
-		this.client.on("open", () => this.initDatabase());
+		}
 
 		// Disconnect DB on exit
 		onExit(async () => {
@@ -231,7 +233,7 @@ export class Database {
 		// No unicity because due to renames & outdated info from oauth provider, there may be the same username on different users
 		users.createIndex({ username: 1 }).catch((e) => logger.error(e));
 		messageEvents
-			.createIndex({ createdAt: 1 }, { expireAfterSeconds: 60 })
+			.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 1 })
 			.catch((e) => logger.error(e));
 		sessions.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }).catch((e) => logger.error(e));
 		sessions.createIndex({ sessionId: 1 }, { unique: true }).catch((e) => logger.error(e));
@@ -272,9 +274,19 @@ export let collections: ReturnType<typeof Database.prototype.getCollections>;
 
 export const ready = (async () => {
 	if (!building) {
-		await Database.getInstance();
-		collections = await Database.getInstance().then((db) => db.getCollections());
+		const db = await Database.getInstance();
+		collections = db.getCollections();
 	} else {
 		collections = {} as unknown as ReturnType<typeof Database.prototype.getCollections>;
 	}
 })();
+
+export async function getCollectionsEarly(): Promise<
+	ReturnType<typeof Database.prototype.getCollections>
+> {
+	await ready;
+	if (!collections) {
+		throw new Error("Database not initialized");
+	}
+	return collections;
+}
