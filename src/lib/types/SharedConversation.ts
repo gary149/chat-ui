@@ -8,7 +8,6 @@ export type SharedConversation = Pick<
 	| "rootMessageId"
 	| "messages"
 	| "preprompt"
-	| "assistantId"
 	| "createdAt"
 	| "updatedAt"
 > & {

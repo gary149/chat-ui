@@ -19,34 +19,16 @@ import { stringifyError } from "$lib/utils/stringifyError";
 import { collections } from "../database";
 import { ObjectId } from "mongodb";
 import type { Message } from "$lib/types/Message";
-import type { Assistant } from "$lib/types/Assistant";
-import { assistantHasWebSearch } from "./assistant";
 
 export async function getTools(
-	toolsPreference: Array<string>,
-	assistant: Pick<Assistant, "rag" | "tools"> | undefined
+	toolsPreference: Array<string>
 ): Promise<Tool[]> {
 	let preferences = toolsPreference;
 
-	if (assistant) {
-		if (assistant?.tools?.length) {
-			preferences = assistant.tools;
-
-			if (assistantHasWebSearch(assistant)) {
-				preferences.push(websearch._id.toString());
-			}
-		} else {
-			if (assistantHasWebSearch(assistant)) {
-				return [websearch, directlyAnswer];
-			}
-			return [directlyAnswer];
-		}
-	}
-
 	// filter based on tool preferences, add the tools that are on by default
 	const activeConfigTools = toolFromConfigs.filter((el) => {
-		if (el.isLocked && el.isOnByDefault && !assistant) return true;
-		return preferences?.includes(el._id.toString()) ?? (el.isOnByDefault && !assistant);
+		if (el.isLocked && el.isOnByDefault) return true;
+		return preferences?.includes(el._id.toString()) ?? el.isOnByDefault;
 	});
 
 	// find tool where the id is in preferences

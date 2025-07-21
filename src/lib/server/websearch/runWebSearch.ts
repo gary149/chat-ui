@@ -3,7 +3,6 @@ import { defaultEmbeddingModel, embeddingModels } from "$lib/server/embeddingMod
 import type { Conversation } from "$lib/types/Conversation";
 import type { Message } from "$lib/types/Message";
 import type { WebSearch, WebSearchScrapedSource } from "$lib/types/WebSearch";
-import type { Assistant } from "$lib/types/Assistant";
 import type { MessageWebSearchUpdate } from "$lib/types/MessageUpdate";
 
 import { search } from "./search/search";
@@ -26,7 +25,6 @@ const MAX_N_PAGES_TO_EMBED = 5 as const;
 export async function* runWebSearch(
 	conv: Conversation,
 	messages: Message[],
-	ragSettings?: Assistant["rag"],
 	query?: string
 ): AsyncGenerator<MessageWebSearchUpdate, WebSearch, undefined> {
 	const prompt = messages[messages.length - 1].content;
@@ -43,7 +41,7 @@ export async function* runWebSearch(
 		}
 
 		// Search the web
-		const { searchQuery, pages } = yield* search(messages, ragSettings, query);
+		const { searchQuery, pages } = yield* search(messages, query);
 		if (pages.length === 0) throw Error("No results found for this search query");
 
 		// Scrape pages

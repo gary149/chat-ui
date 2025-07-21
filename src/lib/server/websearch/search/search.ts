@@ -1,6 +1,5 @@
 import type { WebSearchSource } from "$lib/types/WebSearch";
 import type { Message } from "$lib/types/Message";
-import type { Assistant } from "$lib/types/Assistant";
 import { getWebSearchProvider, searchWeb } from "./endpoints";
 import { generateQuery } from "./generateQuery";
 import { isURLStringLocal } from "$lib/server/isURLLocal";
@@ -18,30 +17,18 @@ const blockList = listSchema.parse(JSON5.parse(config.WEBSEARCH_BLOCKLIST));
 
 export async function* search(
 	messages: Message[],
-	ragSettings?: Assistant["rag"],
 	query?: string
 ): AsyncGenerator<
 	MessageWebSearchUpdate,
 	{ searchQuery: string; pages: WebSearchSource[] },
 	undefined
 > {
-	if (ragSettings && ragSettings?.allowedLinks.length > 0) {
-		yield makeGeneralUpdate({ message: "Using links specified in Assistant" });
-		return {
-			searchQuery: "",
-			pages: await directLinksToSource(ragSettings.allowedLinks).then(filterByBlockList),
-		};
-	}
-
 	const searchQuery = query ?? (await generateQuery(messages));
 	yield makeGeneralUpdate({ message: `Searching ${getWebSearchProvider()}`, args: [searchQuery] });
 
-	// handle the global and (optional) rag lists
-	if (ragSettings && ragSettings?.allowedDomains.length > 0) {
-		yield makeGeneralUpdate({ message: "Filtering on specified domains" });
-	}
+	// handle the global lists
 	const filters = buildQueryFromSiteFilters(
-		[...(ragSettings?.allowedDomains ?? []), ...allowList],
+		allowList,
 		blockList
 	);
 

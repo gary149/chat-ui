@@ -21,7 +21,6 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 		.object({
 			fromShare: z.string().optional(),
 			model: validateModel(models),
-			assistantId: z.string().optional(),
 			preprompt: z.string().optional(),
 		})
 		.safeParse(JSON.parse(body));
@@ -72,7 +71,6 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 		rootMessageId = conversation.rootMessageId ?? rootMessageId;
 		values.model = conversation.model;
 		values.preprompt = conversation.preprompt;
-		values.assistantId = conversation.assistantId?.toString();
 		embeddingModel = conversation.embeddingModel;
 	}
 
@@ -82,16 +80,8 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 		error(400, "Can't start a conversation with an unlisted model");
 	}
 
-	// get preprompt from assistant if it exists
-	const assistant = await collections.assistants.findOne({
-		_id: new ObjectId(values.assistantId),
-	});
-
-	if (assistant) {
-		values.preprompt = assistant.preprompt;
-	} else {
-		values.preprompt ??= model?.preprompt ?? "";
-	}
+	// Use model preprompt if no custom preprompt is provided
+	values.preprompt ??= model?.preprompt ?? "";
 
 	if (messages && messages.length > 0 && messages[0].from === "system") {
 		messages[0].content = values.preprompt;
@@ -104,7 +94,6 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 		messages,
 		model: values.model,
 		preprompt: values.preprompt,
-		assistantId: values.assistantId ? new ObjectId(values.assistantId) : undefined,
 		createdAt: new Date(),
 		updatedAt: new Date(),
 		userAgent: request.headers.get("User-Agent") ?? undefined,

@@ -247,8 +247,6 @@
 				throw new Error("Message to write to not found");
 			}
 
-			// disable websearch if assistant is present
-			const hasAssistant = !!page.data.assistant;
 			const messageUpdatesAbortController = new AbortController();
 
 			let tools = $settings.tools;
@@ -265,7 +263,7 @@
 					messageId,
 					isRetry,
 					isContinue,
-					webSearch: !hasAssistant && !activeModel.tools && $webSearchParameters.useSearch,
+					webSearch: !activeModel.tools && $webSearchParameters.useSearch,
 					tools,
 					files: isRetry ? userMessage?.files : base64Files,
 				},
@@ -534,5 +532,4 @@
 	}}
 	models={data.models}
 	currentModel={findCurrentModel([...data.models, ...data.oldModels], data.model)}
-	assistant={data.assistant}
 />
