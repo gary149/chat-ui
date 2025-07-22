@@ -31,15 +31,8 @@ export async function getTools(
 		return preferences?.includes(el._id.toString()) ?? el.isOnByDefault;
 	});
 
-	// find tool where the id is in preferences
-	const activeCommunityTools = await collections.tools
-		.find({
-			_id: { $in: preferences.map((el) => new ObjectId(el)) },
-		})
-		.toArray()
-		.then((el) => el.map((el) => ({ ...el, call: getCallMethod(el) })));
 
-	return [...activeConfigTools, ...activeCommunityTools];
+	return activeConfigTools;
 }
 
 async function* callTool(
@@ -82,7 +75,6 @@ async function* callTool(
 			Date.now() - startTime
 		);
 
-		await collections.tools.findOneAndUpdate({ _id: tool._id }, { $inc: { useCount: 1 } });
 
 		return { ...toolResult, call, status: ToolResultStatus.Success };
 	} catch (error) {

@@ -10,7 +10,6 @@ import type { Report } from "$lib/types/Report";
 import type { ConversationStats } from "$lib/types/ConversationStats";
 import type { MigrationResult } from "$lib/types/MigrationResult";
 import type { Semaphore } from "$lib/types/Semaphore";
-import type { CommunityToolDB } from "$lib/types/Tool";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import { logger } from "$lib/server/logger";
 import { building } from "$app/environment";
@@ -126,7 +125,6 @@ export class Database {
 		const migrationResults = db.collection<MigrationResult>("migrationResults");
 		const semaphores = db.collection<Semaphore>("semaphores");
 		const tokenCaches = db.collection<TokenCache>("tokens");
-		const tools = db.collection<CommunityToolDB>("tools");
 		const configCollection = db.collection<ConfigKey>("config");
 
 		return {
@@ -143,7 +141,6 @@ export class Database {
 			migrationResults,
 			semaphores,
 			tokenCaches,
-			tools,
 			config: configCollection,
 		};
 	}
@@ -165,7 +162,6 @@ export class Database {
 			messageEvents,
 			semaphores,
 			tokenCaches,
-			tools,
 			config,
 		} = this.getCollections();
 
@@ -248,9 +244,6 @@ export class Database {
 			.createIndex({ createdAt: 1 }, { expireAfterSeconds: 5 * 60 })
 			.catch((e) => logger.error(e));
 		tokenCaches.createIndex({ tokenHash: 1 }).catch((e) => logger.error(e));
-		tools.createIndex({ createdById: 1, userCount: -1 }).catch((e) => logger.error(e));
-		tools.createIndex({ userCount: 1 }).catch((e) => logger.error(e));
-		tools.createIndex({ last24HoursCount: 1 }).catch((e) => logger.error(e));
 
 		conversations
 			.createIndex({
