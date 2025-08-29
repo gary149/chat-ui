@@ -1,7 +1,7 @@
 import { config } from "$lib/server/config";
 import { startOfHour } from "date-fns";
 import { authCondition, requiresUser } from "$lib/server/auth";
-import { collections } from "$lib/server/database";
+import { db } from "$lib/server/db";
 import { models, validModelIdSchema } from "$lib/server/models";
 import { ERROR_MESSAGES } from "$lib/stores/errors";
 import type { Message } from "$lib/types/Message";
@@ -38,43 +38,25 @@ export async function POST({ request, locals, params, getClientAddress }) {
 	}
 
 	// check if the user has access to the conversation
-	const convBeforeCheck = await collections.conversations.findOne({
-		_id: convId,
-		...authCondition(locals),
-	});
+	const convBeforeCheck = await db.conversations.findByIdForLocals(locals, convId);
 
 	if (convBeforeCheck && !convBeforeCheck.rootMessageId) {
-		const res = await collections.conversations.updateOne(
-			{
-				_id: convId,
-			},
-			{
-				$set: {
-					...convBeforeCheck,
-					...convertLegacyConversation(convBeforeCheck),
-				},
-			}
-		);
-
-		if (!res.acknowledged) {
-			error(500, "Failed to convert conversation");
-		}
+		await db.conversations.updateFields(convId, {
+			...convBeforeCheck,
+			...convertLegacyConversation(convBeforeCheck),
+		});
 	}
 
-	const conv = await collections.conversations.findOne({
-		_id: convId,
-		...authCondition(locals),
-	});
+	const conv = await db.conversations.findByIdForLocals(locals, convId);
 
 	if (!conv) {
 		error(404, "Conversation not found");
 	}
 
 	// register the event for ratelimiting
-	await collections.messageEvents.insertOne({
+	await db.messageEvents.insert({
 		type: "message",
 		userId,
-		createdAt: new Date(),
 		expiresAt: new Date(Date.now() + 60_000),
 		ip: getClientAddress(),
 	});
@@ -85,19 +67,10 @@ export async function POST({ request, locals, params, getClientAddress }) {
 
 	// guest mode check
 	if (!locals.user?._id && requiresUser && messagesBeforeLogin) {
-		const totalMessages =
-			(
-				await collections.conversations
-					.aggregate([
-						{ $match: { ...authCondition(locals), "messages.from": "assistant" } },
-						{ $project: { messages: 1 } },
-						{ $limit: messagesBeforeLogin + 1 },
-						{ $unwind: "$messages" },
-						{ $match: { "messages.from": "assistant" } },
-						{ $count: "messages" },
-					])
-					.toArray()
-			)[0]?.messages ?? 0;
+		const totalMessages = await db.conversations.countAssistantMessagesForLocals(
+			locals,
+			messagesBeforeLogin
+		);
 
 		if (totalMessages > messagesBeforeLogin) {
 			error(429, "Exceeded number of messages before login");
@@ -105,18 +78,7 @@ export async function POST({ request, locals, params, getClientAddress }) {
 	}
 	if (usageLimits?.messagesPerMinute) {
 		// check if the user is rate limited
-		const nEvents = Math.max(
-			await collections.messageEvents.countDocuments({
-				userId,
-				type: "message",
-				expiresAt: { $gt: new Date() },
-			}),
-			await collections.messageEvents.countDocuments({
-				ip: getClientAddress(),
-				type: "message",
-				expiresAt: { $gt: new Date() },
-			})
-		);
+		const nEvents = await db.messageEvents.countRecentMessages({ userId, ip: getClientAddress() });
 		if (nEvents > usageLimits.messagesPerMinute) {
 			error(429, ERROR_MESSAGES.rateLimited);
 		}
@@ -315,10 +277,7 @@ export async function POST({ request, locals, params, getClientAddress }) {
 	}
 
 	// update the conversation with the new messages
-	await collections.conversations.updateOne(
-		{ _id: convId },
-		{ $set: { messages: conv.messages, title: conv.title, updatedAt: new Date() } }
-	);
+	await db.conversations.updateFields(convId, { messages: conv.messages, title: conv.title });
 
 	let doneStreaming = false;
 
@@ -356,10 +315,7 @@ export async function POST({ request, locals, params, getClientAddress }) {
 					// Always strip <think> markers from titles when saving
 					const sanitizedTitle = event.title.replace(/<\/?think>/gi, "").trim();
 					conv.title = sanitizedTitle;
-					await collections.conversations.updateOne(
-						{ _id: convId },
-						{ $set: { title: conv?.title, updatedAt: new Date() } }
-					);
+					await db.conversations.updateFields(convId, { title: conv?.title });
 				}
 
 				// Set the final text and the interrupted flag
@@ -407,10 +363,7 @@ export async function POST({ request, locals, params, getClientAddress }) {
 				}
 			}
 
-			await collections.conversations.updateOne(
-				{ _id: convId },
-				{ $set: { title: conv.title, updatedAt: new Date() } }
-			);
+			await db.conversations.updateFields(convId, { title: conv.title });
 			messageToWriteTo.updatedAt = new Date();
 
 			let hasError = false;
@@ -428,11 +381,7 @@ export async function POST({ request, locals, params, getClientAddress }) {
 					ip: getClientAddress(),
 					username: locals.user?.username,
 					// Force-enable multimodal if user settings say so for this model
-					forceMultimodal: Boolean(
-						(await collections.settings.findOne(authCondition(locals)))?.multimodalOverrides?.[
-							model.id
-						]
-					),
+					forceMultimodal: Boolean((await db.settings.findForLocals(locals))?.multimodalOverrides?.[model.id]),
 				};
 				// run the text generation and send updates to the client
 				for await (const event of textGeneration(ctx)) await update(event);
@@ -455,10 +404,10 @@ export async function POST({ request, locals, params, getClientAddress }) {
 				}
 			}
 
-			await collections.conversations.updateOne(
-				{ _id: convId },
-				{ $set: { messages: conv.messages, title: conv?.title, updatedAt: new Date() } }
-			);
+			await db.conversations.updateFields(convId, {
+				messages: conv.messages,
+				title: conv?.title,
+			});
 
 			// used to detect if cancel() is called bc of interrupt or just because the connection closes
 			doneStreaming = true;
@@ -467,10 +416,7 @@ export async function POST({ request, locals, params, getClientAddress }) {
 		},
 		async cancel() {
 			if (doneStreaming) return;
-			await collections.conversations.updateOne(
-				{ _id: convId },
-				{ $set: { messages: conv.messages, title: conv.title, updatedAt: new Date() } }
-			);
+			await db.conversations.updateFields(convId, { messages: conv.messages, title: conv.title });
 		},
 	});
 
@@ -485,16 +431,13 @@ export async function POST({ request, locals, params, getClientAddress }) {
 export async function DELETE({ locals, params }) {
 	const convId = new ObjectId(params.id);
 
-	const conv = await collections.conversations.findOne({
-		_id: convId,
-		...authCondition(locals),
-	});
+	const conv = await db.conversations.findByIdForLocals(locals, convId);
 
 	if (!conv) {
 		error(404, "Conversation not found");
 	}
 
-	await collections.conversations.deleteOne({ _id: conv._id });
+	await db.conversations.deleteByIdForLocals(locals, conv._id);
 
 	return new Response();
 }
@@ -509,10 +452,7 @@ export async function PATCH({ request, locals, params }) {
 
 	const convId = new ObjectId(params.id);
 
-	const conv = await collections.conversations.findOne({
-		_id: convId,
-		...authCondition(locals),
-	});
+	const conv = await db.conversations.findByIdForLocals(locals, convId);
 
 	if (!conv) {
 		error(404, "Conversation not found");
@@ -527,14 +467,7 @@ export async function PATCH({ request, locals, params }) {
 		...(values.model !== undefined && { model: values.model }),
 	};
 
-	await collections.conversations.updateOne(
-		{
-			_id: convId,
-		},
-		{
-			$set: updateValues,
-		}
-	);
+	await db.conversations.updateFields(convId, updateValues);
 
 	return new Response();
 }

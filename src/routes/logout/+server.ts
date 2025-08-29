@@ -1,11 +1,11 @@
 import { dev } from "$app/environment";
 import { base } from "$app/paths";
-import { collections } from "$lib/server/database";
+import { db } from "$lib/server/db";
 import { redirect } from "@sveltejs/kit";
 import { config } from "$lib/server/config";
 
 export async function POST({ locals, cookies }) {
-	await collections.sessions.deleteOne({ sessionId: locals.sessionId });
+	await db.sessions.deleteBySessionId(locals.sessionId);
 
 	cookies.delete(config.COOKIE_NAME, {
 		path: "/",

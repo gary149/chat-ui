@@ -1,6 +1,6 @@
 import { config, ready } from "$lib/server/config";
 import type { Handle, HandleServerError, ServerInit, HandleFetch } from "@sveltejs/kit";
-import { collections } from "$lib/server/database";
+import { db } from "$lib/server/db";
 import { base } from "$app/paths";
 import { authenticateRequest, refreshSessionCookie, requiresUser } from "$lib/server/auth";
 import { ERROR_MESSAGES } from "$lib/stores/errors";
@@ -168,10 +168,10 @@ export const handle: Handle = async ({ event, resolve }) => {
 		// if the request is a POST request or login-related we refresh the cookie
 		refreshSessionCookie(event.cookies, auth.secretSessionId);
 
-		await collections.sessions.updateOne(
-			{ sessionId: auth.sessionId },
-			{ $set: { updatedAt: new Date(), expiresAt: addWeeks(new Date(), 2) } }
-		);
+		await db.sessions.updateBySessionId(auth.sessionId, {
+			updatedAt: new Date(),
+			expiresAt: addWeeks(new Date(), 2),
+		});
 	}
 
 	if (
@@ -196,10 +196,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 			!event.url.pathname.startsWith(`${base}/settings`) &&
 			config.PUBLIC_APP_DISCLAIMER === "1"
 		) {
-			const hasAcceptedEthicsModal = await collections.settings.countDocuments({
-				sessionId: event.locals.sessionId,
-				ethicsModalAcceptedAt: { $exists: true },
-			});
+			const hasAcceptedEthicsModal = await db.settings.hasAcceptedEthicsModal(event.locals.sessionId);
 
 			if (!hasAcceptedEthicsModal) {
 				return errorResponse(405, "You need to accept the welcome modal first");

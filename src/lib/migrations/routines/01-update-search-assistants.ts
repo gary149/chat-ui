@@ -1,5 +1,5 @@
 import type { Migration } from ".";
-import { collections } from "$lib/server/database";
+import { asCollections as collections } from "$lib/server/db";
 import { ObjectId, type AnyBulkWriteOperation } from "mongodb";
 import type { Assistant } from "$lib/types/Assistant";
 import { generateSearchTokens } from "$lib/utils/searchTokens";

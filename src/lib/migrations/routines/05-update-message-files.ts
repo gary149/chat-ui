@@ -1,5 +1,5 @@
 import { ObjectId, type WithId } from "mongodb";
-import { collections } from "$lib/server/database";
+import { asCollections as collections } from "$lib/server/db";
 
 import type { Migration } from ".";
 import type { Conversation } from "$lib/types/Conversation";

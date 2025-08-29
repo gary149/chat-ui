@@ -1,4 +1,4 @@
-import { collections } from "$lib/server/database";
+import { asCollections as collections } from "$lib/server/db";
 import { ObjectId } from "mongodb";
 import type { Semaphores } from "$lib/types/Semaphore";
 

@@ -1,7 +1,7 @@
 import { Elysia } from "elysia";
 import { authPlugin } from "$api/authPlugin";
 import { defaultModel } from "$lib/server/models";
-import { collections } from "$lib/server/database";
+import { db } from "$lib/server/db";
 import { authCondition } from "$lib/server/auth";
 import { models, validateModel } from "$lib/server/models";
 import { DEFAULT_SETTINGS, type SettingsEditable } from "$lib/types/Settings";
@@ -38,13 +38,11 @@ export const userGroup = new Elysia()
 					: null;
 			})
 			.get("/settings", async ({ locals }) => {
-				const settings = await collections.settings.findOne(authCondition(locals));
+				const settings = await db.settings.findForLocals(locals);
 
 				if (settings && !validateModel(models).safeParse(settings?.activeModel).success) {
 					settings.activeModel = defaultModel.id;
-					await collections.settings.updateOne(authCondition(locals), {
-						$set: { activeModel: defaultModel.id },
-					});
+					await db.settings.upsertForUserOrSession(locals, { activeModel: defaultModel.id });
 				}
 
 				// if the model is unlisted, set the active model to the default model
@@ -53,9 +51,7 @@ export const userGroup = new Elysia()
 					models.find((m) => m.id === settings?.activeModel)?.unlisted === true
 				) {
 					settings.activeModel = defaultModel.id;
-					await collections.settings.updateOne(authCondition(locals), {
-						$set: { activeModel: defaultModel.id },
-					});
+					await db.settings.upsertForUserOrSession(locals, { activeModel: defaultModel.id });
 				}
 
 				// todo: get user settings
@@ -95,22 +91,11 @@ export const userGroup = new Elysia()
 
 				// Tools removed: ignore tools updates
 
-				await collections.settings.updateOne(
-					authCondition(locals),
-					{
-						$set: {
-							...settings,
-							...(ethicsModalAccepted && { ethicsModalAcceptedAt: new Date() }),
-							updatedAt: new Date(),
-						},
-						$setOnInsert: {
-							createdAt: new Date(),
-						},
-					},
-					{
-						upsert: true,
-					}
-				);
+				await db.settings.upsertForUserOrSession(locals, {
+					...settings,
+					...(ethicsModalAccepted && { ethicsModalAcceptedAt: new Date() }),
+					updatedAt: new Date(),
+				});
 				// return ok response
 				return new Response();
 			})
@@ -119,11 +104,7 @@ export const userGroup = new Elysia()
 					return [];
 				}
 
-				const reports = await collections.reports
-					.find({
-						createdBy: locals.user?._id ?? locals.sessionId,
-					})
-					.toArray();
+				const reports = await db.reports.findByCreator(locals.user?._id ?? locals.sessionId);
 				return reports;
 			});
 	});

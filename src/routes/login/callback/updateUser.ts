@@ -1,5 +1,5 @@
 import { refreshSessionCookie } from "$lib/server/auth";
-import { collections } from "$lib/server/database";
+import { db } from "$lib/server/db";
 import { ObjectId } from "mongodb";
 import { DEFAULT_SETTINGS } from "$lib/types/Settings";
 import { z } from "zod";
@@ -105,7 +105,7 @@ export async function updateUser(params: {
 	);
 
 	// check if user already exists
-	const existingUser = await collections.users.findOne({ hfUserId });
+	const existingUser = await db.users.findByHfUserId(hfUserId);
 	let userId = existingUser?._id;
 
 	// update session cookie on login
@@ -113,7 +113,7 @@ export async function updateUser(params: {
 	const secretSessionId = crypto.randomUUID();
 	const sessionId = await sha256(secretSessionId);
 
-	if (await collections.sessions.findOne({ sessionId })) {
+	if (await db.sessions.findBySessionId(sessionId)) {
 		error(500, "Session ID collision");
 	}
 
@@ -121,14 +121,17 @@ export async function updateUser(params: {
 
 	if (existingUser) {
 		// update existing user if any
-		await collections.users.updateOne(
-			{ _id: existingUser._id },
-			{ $set: { username, name, avatarUrl, isAdmin, isEarlyAccess } }
-		);
+		await db.users.updateById(existingUser._id, {
+			username,
+			name,
+			avatarUrl,
+			isAdmin,
+			isEarlyAccess,
+		});
 
 		// remove previous session if it exists and add new one
-		await collections.sessions.deleteOne({ sessionId: previousSessionId });
-		await collections.sessions.insertOne({
+		await db.sessions.deleteBySessionId(previousSessionId);
+		await db.sessions.insert({
 			_id: new ObjectId(),
 			sessionId: locals.sessionId,
 			userId: existingUser._id,
@@ -140,8 +143,7 @@ export async function updateUser(params: {
 		});
 	} else {
 		// user doesn't exist yet, create a new one
-		const { insertedId } = await collections.users.insertOne({
-			_id: new ObjectId(),
+		const inserted = await db.users.insert({
 			createdAt: new Date(),
 			updatedAt: new Date(),
 			username,
@@ -153,9 +155,9 @@ export async function updateUser(params: {
 			isEarlyAccess,
 		});
 
-		userId = insertedId;
+		userId = inserted._id;
 
-		await collections.sessions.insertOne({
+		await db.sessions.insert({
 			_id: new ObjectId(),
 			sessionId: locals.sessionId,
 			userId,
@@ -167,23 +169,20 @@ export async function updateUser(params: {
 		});
 
 		// move pre-existing settings to new user
-		const { matchedCount } = await collections.settings.updateOne(
-			{ sessionId: previousSessionId },
-			{
-				$set: { userId, updatedAt: new Date() },
-				$unset: { sessionId: "" },
-			}
-		);
+		const matchedCount = await db.settings.promoteSessionToUser(previousSessionId, userId);
 
 		if (!matchedCount) {
 			// if no settings found for user, create default settings
-			await collections.settings.insertOne({
-				userId,
-				ethicsModalAcceptedAt: new Date(),
-				updatedAt: new Date(),
-				createdAt: new Date(),
-				...DEFAULT_SETTINGS,
-			});
+			await db.settings.upsertForUserOrSession(
+				{ user: { _id: userId } } as unknown as App.Locals,
+				{
+					userId,
+					ethicsModalAcceptedAt: new Date(),
+					updatedAt: new Date(),
+					createdAt: new Date(),
+					...DEFAULT_SETTINGS,
+				}
+			);
 		}
 	}
 
@@ -191,11 +190,5 @@ export async function updateUser(params: {
 	refreshSessionCookie(cookies, secretSessionId);
 
 	// migrate pre-existing conversations
-	await collections.conversations.updateMany(
-		{ sessionId: previousSessionId },
-		{
-			$set: { userId },
-			$unset: { sessionId: "" },
-		}
-	);
+	await db.conversations.promoteSessionToUser(previousSessionId, userId!);
 }

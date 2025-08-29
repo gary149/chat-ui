@@ -1,12 +1,12 @@
 import type { ConversationStats } from "$lib/types/ConversationStats";
-import { CONVERSATION_STATS_COLLECTION, collections } from "$lib/server/database";
+import { CONVERSATION_STATS_COLLECTION, db } from "$lib/server/db";
 import { logger } from "$lib/server/logger";
 import type { ObjectId } from "mongodb";
 import { acquireLock, refreshLock } from "$lib/migrations/lock";
 import { Semaphores } from "$lib/types/Semaphore";
 
 async function getLastComputationTime(): Promise<Date> {
-	const lastStats = await collections.conversationStats.findOne({}, { sort: { "date.at": -1 } });
+	const lastStats = await (await db.raw()).conversationStats.findOne({}, { sort: { "date.at": -1 } });
 	return lastStats?.date?.at || new Date(0);
 }
 
@@ -33,7 +33,7 @@ async function computeStats(params: {
 	span: ConversationStats["date"]["span"];
 	type: ConversationStats["type"];
 }) {
-	const lastComputed = await collections.conversationStats.findOne(
+	const lastComputed = await (await db.raw()).conversationStats.findOne(
 		{ "date.field": params.dateField, "date.span": params.span, type: params.type },
 		{ sort: { "date.at": -1 } }
 	);
@@ -227,7 +227,7 @@ async function computeStats(params: {
 		},
 	];
 
-	await collections.conversations.aggregate(pipeline, { allowDiskUse: true }).next();
+	await (await db.raw()).conversations.aggregate(pipeline, { allowDiskUse: true }).next();
 
 	logger.debug(
 		{ minDate, dateField: params.dateField, span: params.span, type: params.type },

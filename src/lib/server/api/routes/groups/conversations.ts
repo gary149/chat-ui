@@ -1,6 +1,6 @@
 import { Elysia, error, t } from "elysia";
 import { authPlugin } from "$api/authPlugin";
-import { collections } from "$lib/server/database";
+import { db } from "$lib/server/db";
 import { ObjectId } from "mongodb";
 import { authCondition } from "$lib/server/auth";
 import { models, validModelIdSchema } from "$lib/server/models";
@@ -22,21 +22,13 @@ export const conversationGroup = new Elysia().use(authPlugin).group("/conversati
 		.get(
 			"",
 			async ({ locals, query }) => {
-				const convs = await collections.conversations
-					.find(authCondition(locals))
-					.project<Pick<Conversation, "_id" | "title" | "updatedAt" | "model">>({
-						title: 1,
-						updatedAt: 1,
-						model: 1,
-					})
-					.sort({ updatedAt: -1 })
-					.skip((query.p ?? 0) * CONV_NUM_PER_PAGE)
-					.limit(CONV_NUM_PER_PAGE)
-					.toArray();
-
-				const nConversations = await collections.conversations.countDocuments(
-					authCondition(locals)
+				const convs = await db.conversations.listSummariesForLocals(
+					locals,
+					query.p ?? 0,
+					CONV_NUM_PER_PAGE
 				);
+
+				const nConversations = await db.conversations.countForLocals(locals);
 
 				const res = convs.map((conv) => ({
 					_id: conv._id,
@@ -56,9 +48,7 @@ export const conversationGroup = new Elysia().use(authPlugin).group("/conversati
 			}
 		)
 		.delete("", async ({ locals }) => {
-			const res = await collections.conversations.deleteMany({
-				...authCondition(locals),
-			});
+			const res = await db.conversations.deleteManyForLocals(locals);
 			return res.deletedCount;
 		})
 		// search endpoint removed
@@ -78,9 +68,7 @@ export const conversationGroup = new Elysia().use(authPlugin).group("/conversati
 						// if the conver
 						if (params.id.length === 7) {
 							// shared link of length 7
-							conversation = await collections.sharedConversations.findOne({
-								_id: params.id,
-							});
+							conversation = await db.shared.findById(params.id);
 							shared = true;
 
 							if (!conversation) {
@@ -93,16 +81,10 @@ export const conversationGroup = new Elysia().use(authPlugin).group("/conversati
 							} catch {
 								throw new Error("Invalid conversation ID format");
 							}
-							conversation = await collections.conversations.findOne({
-								_id: new ObjectId(params.id),
-								...authCondition(locals),
-							});
+							conversation = await db.conversations.findByIdForLocals(locals, new ObjectId(params.id));
 
 							if (!conversation) {
-								const conversationExists =
-									(await collections.conversations.countDocuments({
-										_id: new ObjectId(params.id),
-									})) !== 0;
+								const conversationExists = await db.conversations.existsById(new ObjectId(params.id));
 
 								if (conversationExists) {
 									throw new Error(
@@ -140,10 +122,10 @@ export const conversationGroup = new Elysia().use(authPlugin).group("/conversati
 						throw new Error("Not implemented");
 					})
 					.delete("", async ({ locals, params }) => {
-						const res = await collections.conversations.deleteOne({
-							_id: new ObjectId(params.id),
-							...authCondition(locals),
-						});
+						const res = await db.conversations.deleteByIdForLocals(
+							locals,
+							new ObjectId(params.id)
+						);
 
 						if (res.deletedCount === 0) {
 							throw new Error("Conversation not found");
@@ -181,19 +163,9 @@ export const conversationGroup = new Elysia().use(authPlugin).group("/conversati
 								...(body.model !== undefined && { model: body.model }),
 							};
 
-							const res = await collections.conversations.updateOne(
-								{
-									_id: new ObjectId(params.id),
-									...authCondition(locals),
-								},
-								{
-									$set: updateValues,
-								}
-							);
+							await db.conversations.updateFields(new ObjectId(params.id), updateValues);
 
-							if (res.modifiedCount === 0) {
-								throw new Error("Conversation not found");
-							}
+							// updated
 
 							return { success: true };
 						},
@@ -234,14 +206,13 @@ export const conversationGroup = new Elysia().use(authPlugin).group("/conversati
 									return message;
 								});
 
-							const res = await collections.conversations.updateOne(
-								{ _id: new ObjectId(conversation._id), ...authCondition(locals) },
-								{ $set: { messages: filteredMessages } }
+							await db.conversations.updateMessagesForLocals(
+								locals,
+								new ObjectId(conversation._id),
+								filteredMessages
 							);
 
-							if (res.modifiedCount === 0) {
-								throw new Error("Deleting message failed");
-							}
+							// updated
 
 							return { success: true };
 						},

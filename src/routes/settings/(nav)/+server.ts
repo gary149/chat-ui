@@ -1,4 +1,4 @@
-import { collections } from "$lib/server/database";
+import { db } from "$lib/server/db";
 import { z } from "zod";
 import { authCondition } from "$lib/server/auth";
 import { DEFAULT_SETTINGS, type SettingsEditable } from "$lib/types/Settings";
@@ -22,22 +22,11 @@ export async function POST({ request, locals }) {
 		})
 		.parse(body) satisfies SettingsEditable;
 
-	await collections.settings.updateOne(
-		authCondition(locals),
-		{
-			$set: {
-				...settings,
-				...(ethicsModalAccepted && { ethicsModalAcceptedAt: new Date() }),
-				updatedAt: new Date(),
-			},
-			$setOnInsert: {
-				createdAt: new Date(),
-			},
-		},
-		{
-			upsert: true,
-		}
-	);
+	await db.settings.upsertForUserOrSession(locals, {
+		...settings,
+		...(ethicsModalAccepted && { ethicsModalAcceptedAt: new Date() }),
+		updatedAt: new Date(),
+	});
 	// return ok response
 	return new Response();
 }

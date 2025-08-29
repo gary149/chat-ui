@@ -1,5 +1,5 @@
 import type { Migration } from ".";
-import { collections } from "$lib/server/database";
+import { asCollections as collections } from "$lib/server/db";
 import { ObjectId } from "mongodb";
 import { ReviewStatus } from "$lib/types/Review";
 

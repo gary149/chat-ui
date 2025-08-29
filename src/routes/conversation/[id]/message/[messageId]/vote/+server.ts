@@ -1,5 +1,5 @@
 import { authCondition } from "$lib/server/auth";
-import { collections } from "$lib/server/database";
+import { db } from "$lib/server/db";
 import { error } from "@sveltejs/kit";
 import { ObjectId } from "mongodb";
 import { z } from "zod";
@@ -14,31 +14,15 @@ export async function POST({ params, request, locals }) {
 	const messageId = params.messageId;
 
 	// aggregate votes per model in order to detect model performance degradation
-	const model = await collections.conversations
-		.findOne(
-			{
-				_id: conversationId,
-				...authCondition(locals),
-			},
-			{ projection: { model: 1 } }
-		)
+	const model = await db.conversations
+		.findProjectionByIdForLocals<{ model: string }>(locals, conversationId, { model: 1 })
 		.then((c) => c?.model);
 
-	const document = await collections.conversations.updateOne(
-		{
-			_id: conversationId,
-			...authCondition(locals),
-			"messages.id": messageId,
-		},
-		{
-			...(score !== 0
-				? {
-						$set: {
-							"messages.$.score": score,
-						},
-					}
-				: { $unset: { "messages.$.score": "" } }),
-		}
+	const document = await db.conversations.updateMessageScoreForLocals(
+		locals,
+		conversationId,
+		messageId,
+		score
 	);
 
 	if (!document.matchedCount) {

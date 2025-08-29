@@ -1,5 +1,5 @@
 import { authCondition } from "$lib/server/auth";
-import { collections } from "$lib/server/database";
+import { db } from "$lib/server/db";
 import { error } from "@sveltejs/kit";
 import { ObjectId } from "mongodb";
 import { z } from "zod";
@@ -21,19 +21,14 @@ export const GET: RequestHandler = async ({ locals, params }) => {
 		const convId = new ObjectId(z.string().parse(params.id));
 
 		// check if the user has access to the conversation
-		const conv = await collections.conversations.findOne({
-			_id: convId,
-			...authCondition(locals),
-		});
+		const conv = await db.conversations.findByIdForLocals(locals, convId);
 
 		if (!conv) {
 			error(404, "Conversation not found");
 		}
 	} else {
 		// look for the conversation in shared conversations
-		const conv = await collections.sharedConversations.findOne({
-			_id: params.id,
-		});
+		const conv = await db.shared.findById(params.id);
 
 		if (!conv) {
 			error(404, "Conversation not found");

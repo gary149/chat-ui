@@ -1,5 +1,5 @@
 import { authCondition } from "$lib/server/auth";
-import { collections } from "$lib/server/database";
+import { db } from "$lib/server/db";
 import { error } from "@sveltejs/kit";
 import { ObjectId } from "mongodb";
 
@@ -10,10 +10,7 @@ export async function DELETE({ locals, params }) {
 		error(400, "Invalid message id");
 	}
 
-	const conversation = await collections.conversations.findOne({
-		...authCondition(locals),
-		_id: new ObjectId(params.id),
-	});
+	const conversation = await db.conversations.findByIdForLocals(locals, new ObjectId(params.id));
 
 	if (!conversation) {
 		error(404, "Conversation not found");
@@ -33,10 +30,7 @@ export async function DELETE({ locals, params }) {
 			return message;
 		});
 
-	await collections.conversations.updateOne(
-		{ _id: conversation._id, ...authCondition(locals) },
-		{ $set: { messages: filteredMessages } }
-	);
+	await db.conversations.updateMessagesForLocals(locals, conversation._id, filteredMessages);
 
 	return new Response();
 }

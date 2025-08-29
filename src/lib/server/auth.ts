@@ -11,7 +11,7 @@ import { sha256 } from "$lib/utils/sha256";
 import { z } from "zod";
 import { dev } from "$app/environment";
 import type { Cookies } from "@sveltejs/kit";
-import { collections } from "$lib/server/database";
+import { db } from "$lib/server/db";
 import JSON5 from "json5";
 import { logger } from "$lib/server/logger";
 import { ObjectId } from "mongodb";
@@ -73,13 +73,13 @@ export function refreshSessionCookie(cookies: Cookies, sessionId: string) {
 }
 
 export async function findUser(sessionId: string) {
-	const session = await collections.sessions.findOne({ sessionId });
+	const session = await db.sessions.findBySessionId(sessionId);
 
 	if (!session) {
 		return null;
 	}
 
-	return await collections.users.findOne({ _id: session.userId });
+	return session ? await db.users.findById(session.userId) : null;
 }
 export const authCondition = (locals: App.Locals) => {
 	if (!locals.user && !locals.sessionId) {
@@ -257,9 +257,9 @@ export async function authenticateRequest(
 			const hash = await sha256(token);
 			sessionId = secretSessionId = hash;
 
-			const cacheHit = await collections.tokenCaches.findOne({ tokenHash: hash });
+			const cacheHit = await db.tokenCache.findByHash(hash);
 			if (cacheHit) {
-				const user = await collections.users.findOne({ hfUserId: cacheHit.userId });
+				const user = await db.users.findByHfUserId(cacheHit.userId);
 				if (!user) {
 					throw new Error("User not found");
 				}
@@ -280,17 +280,17 @@ export async function authenticateRequest(
 			}
 
 			const data = await response.json();
-			const user = await collections.users.findOne({ hfUserId: data.id });
+			const user = await db.users.findByHfUserId(data.id);
 			if (!user) {
 				throw new Error("User not found");
 			}
 
-			await collections.tokenCaches.insertOne({
+			await db.tokenCache.insert({
 				tokenHash: hash,
 				userId: data.id,
 				createdAt: new Date(),
 				updatedAt: new Date(),
-			});
+			} as any);
 
 			return {
 				user,
@@ -305,7 +305,7 @@ export async function authenticateRequest(
 	secretSessionId = crypto.randomUUID();
 	sessionId = await sha256(secretSessionId);
 
-	if (await collections.sessions.findOne({ sessionId })) {
+	if (await db.sessions.findBySessionId(sessionId)) {
 		throw new Error("Session ID collision");
 	}
 

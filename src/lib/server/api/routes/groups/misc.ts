@@ -1,7 +1,7 @@
 import { Elysia } from "elysia";
 import { authPlugin } from "../../authPlugin";
 import { requiresUser } from "$lib/server/auth";
-import { collections } from "$lib/server/database";
+import { db } from "$lib/server/db";
 import { authCondition } from "$lib/server/auth";
 import { config } from "$lib/server/config";
 import { Client } from "@gradio/client";
@@ -28,7 +28,7 @@ export const misc = new Elysia()
 		const messagesBeforeLogin = config.MESSAGES_BEFORE_LOGIN
 			? parseInt(config.MESSAGES_BEFORE_LOGIN)
 			: 0;
-		const nConversations = await collections.conversations.countDocuments(authCondition(locals));
+		const nConversations = await db.conversations.countForLocals(locals);
 
 		if (requiresUser && !locals.user) {
 			if (messagesBeforeLogin === 0) {
@@ -37,19 +37,10 @@ export const misc = new Elysia()
 				loginRequired = true;
 			} else {
 				// get the number of messages where `from === "assistant"` across all conversations.
-				const totalMessages =
-					(
-						await collections.conversations
-							.aggregate([
-								{ $match: { ...authCondition(locals), "messages.from": "assistant" } },
-								{ $project: { messages: 1 } },
-								{ $limit: messagesBeforeLogin + 1 },
-								{ $unwind: "$messages" },
-								{ $match: { "messages.from": "assistant" } },
-								{ $count: "messages" },
-							])
-							.toArray()
-					)[0]?.messages ?? 0;
+				const totalMessages = await db.conversations.countAssistantMessagesForLocals(
+					locals,
+					messagesBeforeLogin
+				);
 
 				loginRequired = totalMessages >= messagesBeforeLogin;
 			}
@@ -106,11 +97,7 @@ export const misc = new Elysia()
 			throw new Error("Data export is not enabled");
 		}
 
-		const nExports = await collections.messageEvents.countDocuments({
-			userId: locals.user._id,
-			type: "export",
-			expiresAt: { $gt: new Date() },
-		});
+		const nExports = await db.messageEvents.countUnexpiredByUserAndType(locals.user._id, "export");
 
 		if (nExports >= 1) {
 			throw new Error(
@@ -127,7 +114,7 @@ export const misc = new Elysia()
 		const zipfile = new yazl.ZipFile();
 
 		const promises = [
-			collections.conversations
+			(await db.raw()).conversations
 				.find({ ...authCondition(locals) })
 				.toArray()
 				.then(async (conversations) => {
@@ -185,29 +172,14 @@ export const misc = new Elysia()
 						"conversations.json"
 					);
 				}),
-			collections.assistants
-				.find({ createdById: locals.user._id })
-				.toArray()
+			db.assistants
+				.findByCreatorId(locals.user._id)
 				.then(async (assistants) => {
 					const formattedAssistants = await Promise.all(
 						assistants.map(async (assistant) => {
 							if (assistant.avatar) {
-								const fileId = collections.bucket.find({ filename: assistant._id.toString() });
 
-								const content = await fileId.next().then(async (file) => {
-									if (!file?._id) return;
-
-									const fileStream = collections.bucket.openDownloadStream(file?._id);
-
-									const fileBuffer = await new Promise<Buffer>((resolve, reject) => {
-										const chunks: Uint8Array[] = [];
-										fileStream.on("data", (chunk) => chunks.push(chunk));
-										fileStream.on("error", reject);
-										fileStream.on("end", () => resolve(Buffer.concat(chunks)));
-									});
-
-									return fileBuffer;
-								});
+								const content = await db.files.getAssistantAvatarBuffer(assistant._id);
 
 								if (!content) return;
 
@@ -252,12 +224,7 @@ export const misc = new Elysia()
 			);
 			zipfile.end();
 			if (locals.user?._id) {
-				await collections.messageEvents.insertOne({
-					userId: locals.user?._id,
-					type: "export",
-					createdAt: new Date(),
-					expiresAt: new Date(Date.now() + 1000 * 60 * 60), // 1 hour
-				});
+				await db.messageEvents.insertExportEvent(locals.user._id);
 			}
 		});
 

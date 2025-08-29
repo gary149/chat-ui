@@ -1,5 +1,5 @@
 import type { Migration } from ".";
-import { collections } from "$lib/server/database";
+import { asCollections as collections } from "$lib/server/db";
 import { ObjectId, type WithId } from "mongodb";
 import type { Conversation } from "$lib/types/Conversation";
 // Simple type to replace removed WebSearchSource for migration compatibility

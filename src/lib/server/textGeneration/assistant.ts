@@ -1,6 +1,6 @@
 import { isURLLocal } from "../isURLLocal";
 import { config } from "$lib/server/config";
-import { collections } from "$lib/server/database";
+import { db } from "$lib/server/db";
 import type { Assistant } from "$lib/types/Assistant";
 import type { ObjectId } from "mongodb";
 
@@ -53,11 +53,11 @@ export async function processPreprompt(preprompt: string, user_message: string |
 }
 
 export async function getAssistantById(id?: ObjectId) {
-	return collections.assistants
-		.findOne<
-			Pick<Assistant, "dynamicPrompt" | "generateSettings">
-		>({ _id: id }, { projection: { dynamicPrompt: 1, generateSettings: 1 } })
-		.then((a) => a ?? undefined);
+	const a = await db.assistants.findProjectionById<Pick<Assistant, "dynamicPrompt" | "generateSettings">>(
+		id,
+		{ dynamicPrompt: 1, generateSettings: 1 }
+	);
+	return a ?? undefined;
 }
 
 export function assistantHasDynamicPrompt(assistant?: Pick<Assistant, "dynamicPrompt">) {

@@ -2,7 +2,7 @@ import { Elysia } from "elysia";
 import type { BackendModel } from "$lib/server/models";
 import { authPlugin } from "../../authPlugin";
 import { authCondition } from "$lib/server/auth";
-import { collections } from "$lib/server/database";
+import { db } from "$lib/server/db";
 
 export type GETModelsResponse = Array<{
 	id: string;
@@ -96,21 +96,10 @@ export const modelGroup = new Elysia().group("/models", (app) =>
 					if (!locals.sessionId) {
 						return error(401, "Unauthorized");
 					}
-					await collections.settings.updateOne(
-						authCondition(locals),
-						{
-							$set: {
-								activeModel: model.id,
-								updatedAt: new Date(),
-							},
-							$setOnInsert: {
-								createdAt: new Date(),
-							},
-						},
-						{
-							upsert: true,
-						}
-					);
+					await db.settings.upsertForUserOrSession(locals, {
+						activeModel: model.id,
+						updatedAt: new Date(),
+					});
 
 					return new Response();
 				})
