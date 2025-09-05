@@ -17,10 +17,12 @@
 		type MessageReasoningUpdate,
 		MessageReasoningUpdateType,
 	} from "$lib/types/MessageUpdate";
+	import type { MessageToolUpdate } from "$lib/types/MessageUpdate";
 	import MarkdownRenderer from "./MarkdownRenderer.svelte";
 	import OpenReasoningResults from "./OpenReasoningResults.svelte";
 	import Alternatives from "./Alternatives.svelte";
 	import MessageAvatar from "./MessageAvatar.svelte";
+	import ToolUpdate from "./ToolUpdate.svelte";
 
 	interface Props {
 		message: Message;
@@ -72,6 +74,26 @@
 		message.updates?.find(
 			({ type }) => type === MessageUpdateType.FinalAnswer
 		) as MessageFinalAnswerUpdate
+	);
+
+	// Group tool updates by uuid for rendering
+	let toolUpdates = $derived(
+		message.updates
+			?.filter(({ type }) => type === MessageUpdateType.Tool)
+			.reduce(
+				(acc, update) => {
+					// type guard at runtime
+					const u = update as unknown as MessageToolUpdate;
+					acc[u.uuid] = acc[u.uuid] ?? [];
+					acc[u.uuid].push(u);
+					return acc;
+				},
+				{} as Record<string, MessageToolUpdate[]>
+			)
+	);
+
+	let hasToolUpdates = $derived(
+		!!toolUpdates && Object.values(toolUpdates).some((t) => (t?.length ?? 0) > 0)
 	);
 	let urlNotTrailing = $derived(page.url.pathname.replace(/\/$/, ""));
 	// let downloadLink = $derived(urlNotTrailing + `/message/${message.id}/prompt`);
@@ -147,6 +169,16 @@
 				/>
 			{/if}
 
+			{#if toolUpdates}
+				{#each Object.values(toolUpdates) as tool}
+					{#if tool.length}
+						{#key tool[0].uuid}
+							<ToolUpdate {tool} {loading} />
+						{/key}
+					{/if}
+				{/each}
+			{/if}
+
 			<div bind:this={contentEl}>
 				{#if isLast && loading && message.content.length === 0}
 					<IconLoading classNames="loading inline ml-2 first:ml-0" />
@@ -184,7 +216,7 @@
 			</div>
 		</div>
 
-		{#if !loading && message.content}
+		{#if !loading && (message.content || hasToolUpdates)}
 			<div class="absolute -bottom-3.5 right-1 flex items-center gap-0.5">
 				<CopyToClipBoardBtn
 					onClick={() => {
