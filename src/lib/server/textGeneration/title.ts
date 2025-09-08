@@ -37,29 +37,25 @@ export async function generateTitle(prompt: string, modelId?: string) {
         generateFromDefaultEndpoint({
             messages: [{ from: "user", content: prompt }],
             preprompt:
-                "You are a summarization AI. Summarize the user's request into a single short sentence of four words or less. Do not try to answer it, only summarize the user's query. Always start your answer with an emoji relevant to the summary",
+                "You are a summarization AI. Summarize the user's request into a single short sentence of four words or less. Do not try to answer it; only summarize the user's query.",
             generateSettings: {
                 max_new_tokens: 30,
             },
             modelId,
         })
     )
-		.then((summary) => {
-			const firstFive = prompt.split(/\s+/g).slice(0, 5).join(" ");
-			const trimmed = summary.trim();
-			// Fallback: if empty, use emoji + first five words
-			if (!trimmed) {
-				return "💬 " + firstFive;
-			}
-			// Ensure emoji prefix if missing
-			if (!/\p{Emoji}/u.test(trimmed.slice(0, 3))) {
-				return "💬 " + trimmed;
-			}
-			return trimmed;
-		})
-		.catch((e) => {
-			logger.error(e);
-			const firstFive = prompt.split(/\s+/g).slice(0, 5).join(" ");
-			return "💬 " + firstFive;
-		});
+        .then((summary) => {
+            const firstFive = prompt.split(/\s+/g).slice(0, 5).join(" ");
+            const trimmed = summary.trim();
+            // Fallback: if empty, use first five words (no emoji)
+            if (!trimmed) {
+                return firstFive;
+            }
+            return trimmed;
+        })
+        .catch((e) => {
+            logger.error(e);
+            const firstFive = prompt.split(/\s+/g).slice(0, 5).join(" ");
+            return firstFive;
+        });
 }

@@ -179,15 +179,14 @@ async function seed() {
 	if (flags.includes("settings") || flags.includes("all")) {
 		console.log("Updating settings for all users");
 		users.forEach(async (user) => {
-			const settings: Settings = {
-				userId: user._id,
-				shareConversationsWithModelAuthors: faker.datatype.boolean(0.25),
-				hideEmojiOnSidebar: faker.datatype.boolean(0.25),
-				ethicsModalAcceptedAt: faker.date.recent({ days: 30 }),
-				activeModel: faker.helpers.arrayElement(modelIds),
-				createdAt: faker.date.recent({ days: 30 }),
-				updatedAt: faker.date.recent({ days: 30 }),
-				disableStream: faker.datatype.boolean(0.25),
+            const settings: Settings = {
+                userId: user._id,
+                shareConversationsWithModelAuthors: faker.datatype.boolean(0.25),
+                ethicsModalAcceptedAt: faker.date.recent({ days: 30 }),
+                activeModel: faker.helpers.arrayElement(modelIds),
+                createdAt: faker.date.recent({ days: 30 }),
+                updatedAt: faker.date.recent({ days: 30 }),
+                disableStream: faker.datatype.boolean(0.25),
 				directPaste: faker.datatype.boolean(0.25),
 				customPrompts: {},
 				assistants: [],
@@ -268,7 +267,7 @@ async function seed() {
 							createdAt: faker.date.recent({ days: 145 }),
 							updatedAt: faker.date.recent({ days: 145 }),
 							model: faker.helpers.arrayElement(modelIds),
-							title: faker.internet.emoji() + " " + faker.hacker.phrase(),
+                            title: faker.hacker.phrase(),
 							// embeddings removed in this build
 							messages,
 							rootMessageId: messages[0].id,

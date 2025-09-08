@@ -22,13 +22,9 @@ export const load = async ({ depends, fetch, url }) => {
 	const defaultModel = models[0];
 
 	const { conversations: rawConversations, nConversations } = conversationsData;
-	const conversations = rawConversations.map((conv) => {
-		if (settings?.hideEmojiOnSidebar) {
-			conv.title = conv.title.replace(/\p{Emoji}/gu, "");
-		}
-
-		// Always strip <think> markers from titles for sidebar display
-		conv.title = conv.title.replace(/<\/?think>/gi, "");
+    const conversations = rawConversations.map((conv) => {
+        // Always strip <think> markers from titles for sidebar display
+        conv.title = conv.title.replace(/<\/?think>/gi, "");
 
 		// remove invalid unicode and trim whitespaces
 		conv.title = conv.title.replace(/\uFFFD/gu, "").trimStart();
