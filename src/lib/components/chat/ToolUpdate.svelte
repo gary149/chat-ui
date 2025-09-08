@@ -80,6 +80,33 @@
         }, 300);
       })();
   });
+
+  // Dedupe parameters: show only from the latest Call update with parsed parameters
+  let latestParams = $derived(() => {
+    const lastCall = [...tool].reverse().find(isMessageToolCallUpdate);
+    const params = lastCall?.call?.parameters || {};
+    return params && typeof params === "object" ? params : {};
+  });
+
+  // Aggregate results: concatenate all success outputs' content fields (if present)
+  let aggregatedResult = $derived(() => {
+    const parts: string[] = [];
+    for (const tu of tool) {
+      if (isMessageToolResultUpdate(tu) && tu.result.status === ToolResultStatus.Success) {
+        for (const o of tu.result.outputs ?? []) {
+          const v = (o as any)?.content ?? JSON.stringify(o);
+          if (typeof v === "string") parts.push(v);
+        }
+      }
+    }
+    return parts.join("");
+  });
+
+  // Last error message (if any)
+  let lastError = $derived(() => {
+    const err = [...tool].reverse().find(isMessageToolErrorUpdate);
+    return err?.message ?? "";
+  });
 </script>
 
 {#if toolFnName}
@@ -126,47 +153,36 @@
         >
       </span>
     </summary>
-    {#each tool as toolUpdate}
-      {#if toolUpdate.subtype === MessageToolUpdateType.Call}
-        <div class="mt-1 flex items-center gap-2 opacity-80">
-          <h3 class="text-sm">Parameters</h3>
-          <div class="h-px flex-1 bg-gradient-to-r from-gray-500/20"></div>
-        </div>
-        <ul class="py-1 text-sm">
-          {#each Object.entries(toolUpdate.call.parameters ?? {}) as [k, v]}
-            {#if v !== null}
-              <li>
-                <span class="font-semibold">{k}</span>:
-                <span>{v}</span>
-              </li>
-            {/if}
-          {/each}
-        </ul>
-      {:else if toolUpdate.subtype === MessageToolUpdateType.Error}
-        <div class="mt-1 flex items-center gap-2 opacity-80">
-          <h3 class="text-sm">Error</h3>
-          <div class="h-px flex-1 bg-gradient-to-r from-gray-500/20"></div>
-        </div>
-        <p class="text-sm">{toolUpdate.message}</p>
-      {:else if isMessageToolResultUpdate(toolUpdate) && toolUpdate.result.status === ToolResultStatus.Success && toolUpdate.result.display}
-        <div class="mt-1 flex items-center gap-2 opacity-80">
-          <h3 class="text-sm">Result</h3>
-          <div class="h-px flex-1 bg-gradient-to-r from-gray-500/20"></div>
-        </div>
-        <ul class="py-1 text-sm">
-          {#each toolUpdate.result.outputs as output}
-            {#each Object.entries(output) as [k, v]}
-              {#if v !== null}
-                <li>
-                  <span class="font-semibold">{k}</span>:
-                  <span>{v}</span>
-                </li>
-              {/if}
-            {/each}
-          {/each}
-        </ul>
-      {/if}
-    {/each}
+    {#if Object.keys(latestParams).length}
+      <div class="mt-1 flex items-center gap-2 opacity-80">
+        <h3 class="text-sm">Parameters</h3>
+        <div class="h-px flex-1 bg-gradient-to-r from-gray-500/20"></div>
+      </div>
+      <ul class="py-1 text-sm">
+        {#each Object.entries(latestParams) as [k, v]}
+          {#if v !== null}
+            <li>
+              <span class="font-semibold">{k}</span>:
+              <span>{String(v)}</span>
+            </li>
+          {/if}
+        {/each}
+      </ul>
+    {/if}
+
+    {#if toolError}
+      <div class="mt-1 flex items-center gap-2 opacity-80">
+        <h3 class="text-sm">Error</h3>
+        <div class="h-px flex-1 bg-gradient-to-r from-gray-500/20"></div>
+      </div>
+      <pre class="whitespace-pre-wrap rounded-md bg-red-50 p-2 text-red-800 dark:bg-red-950/40 dark:text-red-300">{lastError}</pre>
+    {:else if aggregatedResult.trim().length}
+      <div class="mt-1 flex items-center gap-2 opacity-80">
+        <h3 class="text-sm">Result</h3>
+        <div class="h-px flex-1 bg-gradient-to-r from-gray-500/20"></div>
+      </div>
+      <pre class="max-h-64 overflow-auto whitespace-pre-wrap rounded-md bg-gray-50 p-2 text-gray-700 dark:bg-gray-800 dark:text-gray-200">{aggregatedResult}</pre>
+    {/if}
   </details>
 {/if}
 
@@ -180,4 +196,3 @@
     animation: loading 2s linear infinite;
   }
 </style>
-

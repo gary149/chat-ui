@@ -254,7 +254,9 @@
 								<div
 									class="prose max-w-none dark:prose-invert max-sm:prose-sm prose-headings:font-semibold prose-h1:text-lg prose-h2:text-base prose-h3:text-base prose-pre:bg-gray-800 dark:prose-pre:bg-gray-900"
 								>
-									<MarkdownRenderer content={section.text} />
+									{#key section.text}
+										<MarkdownRenderer content={section.text.replace(/<\/?think>/gi, "")} />
+									{/key}
 								</div>
 							{/if}
 						{:else}
