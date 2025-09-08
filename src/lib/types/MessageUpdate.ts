@@ -56,6 +56,8 @@ interface MessageToolBaseUpdate<TSubType extends MessageToolUpdateType> {
 	type: MessageUpdateType.Tool;
 	subtype: TSubType;
 	uuid: string;
+	/** Character offset in assistant content where the tool was triggered */
+	anchor?: number;
 }
 
 export interface MessageToolCallUpdate extends MessageToolBaseUpdate<MessageToolUpdateType.Call> {

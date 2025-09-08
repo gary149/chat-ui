@@ -73,8 +73,7 @@ export async function fetchMessageUpdates(
 
 // Tool update type guards (restored for UI rendering)
 export const isMessageToolUpdate = (update: MessageUpdate): update is MessageToolUpdate =>
-    // @ts-expect-error – union includes Tool when available
-    update.type === MessageUpdateType.Tool;
+    (update as any)?.type === MessageUpdateType.Tool;
 export const isMessageToolCallUpdate = (
     update: MessageUpdate
 ): update is MessageToolCallUpdate => isMessageToolUpdate(update) && update.subtype === MessageToolUpdateType.Call;

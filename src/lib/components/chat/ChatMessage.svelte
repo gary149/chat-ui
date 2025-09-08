@@ -95,6 +95,47 @@
 	let hasToolUpdates = $derived(
 		!!toolUpdates && Object.values(toolUpdates).some((t) => (t?.length ?? 0) > 0)
 	);
+
+	// Compute inline sections by anchor order: text slices + tool blocks
+	type Section =
+		| { kind: "text"; text: string }
+		| { kind: "tool"; tool: MessageToolUpdate[] };
+
+	// Precompute anchored groups for inline rendering
+	let anchoredGroups = $derived(
+		!hasToolUpdates
+			? []
+			: Object.values(toolUpdates ?? {})
+					.map((group) => ({
+						group,
+						anchor: Math.min(
+							...group
+								.map((u) => (u as any).anchor as number | undefined)
+								.filter((v): v is number => typeof v === "number")
+						),
+					}))
+					.filter((g) => Number.isFinite(g.anchor))
+	);
+
+	let hasAnchoredToolSections = $derived((anchoredGroups?.length ?? 0) > 0);
+
+	let sections: Section[] = $derived((() => {
+		if (!hasAnchoredToolSections) return [{ kind: "text", text: message.content }] as Section[];
+
+		// Sort by anchor ascending; stable order preserved
+		const sorted = [...anchoredGroups].sort((a, b) => (a.anchor ?? 0) - (b.anchor ?? 0));
+
+		const out: Section[] = [];
+		let cursor = 0;
+		for (const g of sorted) {
+			const pos = Math.max(0, Math.min(g.anchor ?? 0, message.content.length));
+			if (pos > cursor) out.push({ kind: "text", text: message.content.slice(cursor, pos) });
+			out.push({ kind: "tool", tool: g.group });
+			cursor = pos;
+		}
+		if (cursor < message.content.length) out.push({ kind: "text", text: message.content.slice(cursor) });
+		return out;
+	})());
 	let urlNotTrailing = $derived(page.url.pathname.replace(/\/$/, ""));
 	// let downloadLink = $derived(urlNotTrailing + `/message/${message.id}/prompt`);
 
@@ -169,7 +210,7 @@
 				/>
 			{/if}
 
-			{#if toolUpdates}
+				{#if toolUpdates && !hasAnchoredToolSections}
 				{#each Object.values(toolUpdates) as tool}
 					{#if tool.length}
 						{#key tool[0].uuid}
@@ -207,11 +248,19 @@
 						{/if}
 					{/each}
 				{:else}
-					<div
-						class="prose max-w-none dark:prose-invert max-sm:prose-sm prose-headings:font-semibold prose-h1:text-lg prose-h2:text-base prose-h3:text-base prose-pre:bg-gray-800 dark:prose-pre:bg-gray-900"
-					>
-						<MarkdownRenderer content={message.content} />
-					</div>
+					{#each sections as section, i}
+						{#if section.kind === "text"}
+							{#if section.text.trim().length > 0}
+								<div
+									class="prose max-w-none dark:prose-invert max-sm:prose-sm prose-headings:font-semibold prose-h1:text-lg prose-h2:text-base prose-h3:text-base prose-pre:bg-gray-800 dark:prose-pre:bg-gray-900"
+								>
+									<MarkdownRenderer content={section.text} />
+								</div>
+							{/if}
+						{:else}
+							<ToolUpdate tool={section.tool} {loading} />
+						{/if}
+					{/each}
 				{/if}
 			</div>
 		</div>

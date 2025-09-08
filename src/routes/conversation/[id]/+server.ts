@@ -351,6 +351,11 @@ export async function POST({ request, locals, params, getClientAddress }) {
 					messageToWriteTo.reasoning += event.token;
 				}
 
+				// If this is a tool update, stamp anchor at current content length
+				if ((event as any).type === MessageUpdateType.Tool) {
+					(event as any).anchor ??= messageToWriteTo.content.length;
+				}
+
 				// Set the title
 				else if (event.type === MessageUpdateType.Title) {
 					// Always strip <think> markers from titles when saving

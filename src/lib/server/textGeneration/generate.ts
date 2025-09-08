@@ -1,8 +1,9 @@
 import { config } from "$lib/server/config";
 import {
-	MessageReasoningUpdateType,
-	MessageUpdateType,
-	type MessageUpdate,
+    MessageReasoningUpdateType,
+    MessageUpdateType,
+    MessageToolUpdateType,
+    type MessageUpdate,
 } from "$lib/types/MessageUpdate";
 import { AbortedGenerations } from "../abortedGenerations";
 import type { TextGenerationContext } from "./types";
@@ -32,6 +33,9 @@ export async function* generate(
 	let lastReasoningUpdate = new Date();
 	let status = "";
 	const startTime = new Date();
+
+	// Track streaming tool-call args by uuid (id or index+name fallback)
+	const toolArgBuffers: Record<string, { name?: string; args: string; parsedPublished?: boolean; callPublished?: boolean }> = {};
 	if (
 		model.reasoning &&
 		// if the beginToken is an empty string, the model starts in reasoning mode
@@ -58,6 +62,90 @@ export async function* generate(
 		isMultimodal: (forceMultimodal ?? false) || model.multimodal,
 		conversationId: conv._id,
 	})) {
+		// Map GLM-4.5 reasoning delta if present
+		const reasoningDelta = (output as any)?.reasoningDelta as string | undefined;
+		if (typeof reasoningDelta === "string" && reasoningDelta.length > 0) {
+			reasoningBuffer += reasoningDelta;
+			yield {
+				type: MessageUpdateType.Reasoning,
+				subtype: MessageReasoningUpdateType.Stream,
+				token: reasoningDelta,
+			};
+		}
+
+		// Handle tool call argument streaming
+		const toolCallDeltas = (output as any)?.toolCallDeltas as
+			| Array<{ index: number; id?: string; name?: string; argumentsChunk?: string }>
+			| undefined;
+		if (toolCallDeltas && toolCallDeltas.length > 0) {
+			for (const d of toolCallDeltas) {
+				const uuid = d.id ?? `${d.index}-${d.name ?? "tool"}`;
+				const buf = (toolArgBuffers[uuid] = toolArgBuffers[uuid] ?? { args: "" });
+				if (d.name) buf.name = d.name;
+				if (typeof d.argumentsChunk === "string") buf.args += d.argumentsChunk;
+
+				// Publish initial call update once we know the name
+                if (!buf.callPublished && buf.name) {
+                    buf.callPublished = true;
+                    yield {
+                        type: MessageUpdateType.Tool,
+                        subtype: MessageToolUpdateType.Call,
+                        uuid,
+                        call: { name: buf.name!, parameters: {} },
+                    } as any;
+                }
+
+				// Try to parse JSON arguments to parameters
+				if (!buf.parsedPublished) {
+                    try {
+                        const parsed = JSON.parse(buf.args);
+                        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+                            buf.parsedPublished = true;
+                            yield {
+                                type: MessageUpdateType.Tool,
+                                subtype: MessageToolUpdateType.Call,
+                                uuid,
+                                call: { name: buf.name ?? "tool", parameters: parsed as Record<string, unknown> as any },
+                            } as any;
+                        }
+                    } catch {
+                        // ignore until JSON is complete
+                    }
+                }
+            }
+        }
+
+		// Handle tool result streaming chunks
+		const toolResultDelta = (output as any)?.toolResultDelta as
+			| { id?: string; name?: string; contentChunk?: string }
+			| undefined;
+        if (toolResultDelta) {
+            const uuid = toolResultDelta.id ?? `${toolResultDelta.name ?? "tool"}-result`;
+            const contentChunk = toolResultDelta.contentChunk ?? "";
+            if (contentChunk.length > 0) {
+                const isError = /(^|\b)(error|failed|exception|traceback)\b/i.test(contentChunk);
+                if (isError) {
+                    yield {
+                        type: MessageUpdateType.Tool,
+                        subtype: MessageToolUpdateType.Error,
+                        uuid,
+                        message: contentChunk,
+                    } as any;
+                } else {
+                    yield {
+                        type: MessageUpdateType.Tool,
+                        subtype: MessageToolUpdateType.Result,
+                        uuid,
+                        result: {
+                            status: "success",
+                            call: { name: toolResultDelta.name ?? "tool", parameters: {}, toolId: toolResultDelta.id },
+                            outputs: [{ content: contentChunk }],
+                            display: true,
+                        },
+                    } as any;
+                }
+            }
+        }
 		// text generation completed
 		if (output.generated_text) {
 			let interrupted =
@@ -132,7 +220,6 @@ Do not use prefixes such as Response: or Answer: when answering to the user.`,
 				type: MessageUpdateType.FinalAnswer,
 				text: finalAnswer,
 				interrupted,
-				webSources: output.webSources,
 			};
 			continue;
 		}
