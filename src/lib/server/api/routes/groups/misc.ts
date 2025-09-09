@@ -9,7 +9,6 @@ import yazl from "yazl";
 import { downloadFile } from "$lib/server/files/downloadFile";
 import mimeTypes from "mime-types";
 import { logger } from "$lib/server/logger";
-import { callMcpTool, type McpServerConfig } from "$lib/server/mcp/httpClient";
 
 export interface FeatureFlags {
 	enableAssistants: boolean;
@@ -24,40 +23,6 @@ export type ApiReturnType = Awaited<ReturnType<typeof Client.prototype.view_api>
 export const misc = new Elysia()
 	.use(authPlugin)
 	.get("/public-config", async () => config.getPublicConfig())
-    // Minimal MCP HTTP entry for testing tools outside chat
-    .post("/mcp/exec", async ({ request }) => {
-        try {
-            const { server: serverName, tool, args } = await request.json();
-
-            const serversRaw = config.MCP_SERVERS || "[]";
-            let servers: McpServerConfig[] = [];
-            try {
-                servers = JSON.parse(serversRaw || "[]") as McpServerConfig[];
-            } catch {
-                servers = [];
-            }
-            if (!Array.isArray(servers) || servers.length === 0) {
-                return new Response(
-                    JSON.stringify({ error: "MCP is disabled (no servers configured)" }),
-                    { status: 404 }
-                );
-            }
-
-            const server = servers.find((s) => s.name === serverName);
-            if (!server) {
-                return new Response(
-                    JSON.stringify({ error: `Unknown MCP server: ${serverName}` }),
-                    { status: 400 }
-                );
-            }
-
-            const out = await callMcpTool(server, tool, args);
-            return { ok: true, content: out };
-        } catch (e) {
-            logger.error({ err: e }, "MCP exec failed");
-            return new Response(JSON.stringify({ error: "MCP exec failed" }), { status: 500 });
-        }
-    })
 	.get("/feature-flags", async ({ locals }) => {
 		let loginRequired = false;
 		const messagesBeforeLogin = config.MESSAGES_BEFORE_LOGIN

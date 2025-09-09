@@ -1,8 +1,9 @@
 import { config } from "$lib/server/config";
 import {
-	MessageReasoningUpdateType,
-	MessageUpdateType,
-	type MessageUpdate,
+    MessageReasoningUpdateType,
+    MessageUpdateType,
+    MessageToolUpdateType,
+    type MessageUpdate,
 } from "$lib/types/MessageUpdate";
 import { AbortedGenerations } from "../abortedGenerations";
 import type { TextGenerationContext } from "./types";
@@ -10,6 +11,10 @@ import type { EndpointMessage } from "../endpoints/endpoints";
 import { generateFromDefaultEndpoint } from "../generateFromDefaultEndpoint";
 import { generateSummaryOfReasoning } from "./reasoning";
 import { logger } from "../logger";
+import { getOpenAiToolsForMcp } from "$lib/server/mcp/tools";
+import type { McpServerConfig } from "$lib/server/mcp/httpClient";
+import { callMcpTool } from "$lib/server/mcp/httpClient";
+import { randomUUID } from "crypto";
 
 type GenerateContext = Omit<TextGenerationContext, "messages"> & { messages: EndpointMessage[] };
 
@@ -26,6 +31,178 @@ export async function* generate(
 	}: GenerateContext,
 	preprompt?: string
 ): AsyncIterable<MessageUpdate> {
+    // If MCP servers are configured, attempt a single model-driven tool call first.
+    // If a tool is called, we stream Tool updates and return the tool output as the final answer.
+    try {
+        const serversRaw = (config as any).MCP_SERVERS || "[]";
+        let servers: McpServerConfig[] = [];
+        try { servers = JSON.parse(serversRaw || "[]"); } catch { servers = []; }
+        const mcpEnabled = Array.isArray(servers) && servers.length > 0;
+
+        if (mcpEnabled) {
+            const { tools: oaTools, mapping } = await getOpenAiToolsForMcp(servers);
+            if (oaTools.length > 0) {
+                const { OpenAI } = await import("openai");
+                const openai = new OpenAI({
+                    apiKey: config.OPENAI_API_KEY || config.HF_TOKEN || "sk-",
+                    baseURL: config.OPENAI_BASE_URL || "https://api.openai.com/v1",
+                });
+
+                // Prepare OpenAI messages with optional multimodal support
+                const mmEnabled = (forceMultimodal ?? false) || model.multimodal;
+                const toOA = (msg: EndpointMessage): any => {
+                    if (msg.from === "user" && mmEnabled) {
+                        const parts: any[] = [{ type: "text", text: msg.content }];
+                        for (const f of msg.files ?? []) {
+                            if (f.mime.startsWith("image/")) {
+                                parts.push({
+                                    type: "image_url",
+                                    image_url: {
+                                        url: `data:${f.mime};base64,${f.value}`,
+                                        detail: "auto",
+                                    },
+                                });
+                            }
+                        }
+                        return { role: msg.from, content: parts };
+                    }
+                    return { role: msg.from, content: msg.content };
+                };
+
+                let messagesOpenAI: any[] = messages.map(toOA);
+                const hasSystemMessage = messagesOpenAI.length > 0 && messagesOpenAI[0]?.role === "system";
+                if (hasSystemMessage) {
+                    if (preprompt !== undefined) {
+                        const userSystemPrompt = messagesOpenAI[0].content || "";
+                        messagesOpenAI[0].content = preprompt + (userSystemPrompt ? "\n\n" + userSystemPrompt : "");
+                    }
+                } else {
+                    messagesOpenAI = [{ role: "system", content: preprompt ?? "" }, ...messagesOpenAI];
+                }
+                if (!model.systemRoleSupported && messagesOpenAI.length > 0 && messagesOpenAI[0]?.role === "system") {
+                    messagesOpenAI[0] = { ...messagesOpenAI[0], role: "user" };
+                }
+
+                const parameters = { ...model.parameters, ...assistant?.generateSettings } as any;
+                const body: any = {
+                    model: (model as any).id ?? model.name,
+                    messages: messagesOpenAI,
+                    stream: false,
+                    ...(parameters?.max_new_tokens !== undefined
+                        ? { max_tokens: parameters.max_new_tokens }
+                        : {}),
+                    stop: parameters?.stop,
+                    temperature: parameters?.temperature,
+                    top_p: parameters?.top_p,
+                    frequency_penalty: parameters?.repetition_penalty,
+                    presence_penalty: parameters?.presence_penalty,
+                    tools: oaTools,
+                    tool_choice: "auto",
+                };
+
+                const completion = await openai.chat.completions.create(body);
+                const first = completion.choices?.[0];
+                const call = first?.message?.tool_calls?.[0];
+                if (call?.type === "function" && call.function?.name) {
+                    const fnName = call.function.name;
+                    const map = (mapping as any)[fnName];
+
+                    const uuid = randomUUID();
+                    const parseArgs = (raw: string | null | undefined): any => {
+                        if (!raw || !String(raw).trim()) return {};
+                        try { return JSON.parse(raw); } catch { return {}; }
+                    };
+                    const argsObj = parseArgs(call.function.arguments as any);
+
+                    // Emit Tool.Call and ETA updates
+                    const toPrimitive = (v: unknown): string | number | boolean | undefined => {
+                        if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") return v;
+                        return undefined;
+                    };
+                    const parametersClean: Record<string, string | number | boolean> = {};
+                    if (argsObj && typeof argsObj === "object") {
+                        for (const [k, v] of Object.entries(argsObj)) {
+                            const p = toPrimitive(v);
+                            if (p !== undefined) parametersClean[k] = p;
+                        }
+                    }
+
+                    yield {
+                        type: MessageUpdateType.Tool,
+                        subtype: MessageToolUpdateType.Call,
+                        uuid,
+                        call: { name: fnName, parameters: parametersClean },
+                    } as MessageUpdate;
+
+                    // Rough ETA hint for UI progress bar
+                    yield {
+                        type: MessageUpdateType.Tool,
+                        subtype: MessageToolUpdateType.ETA,
+                        uuid,
+                        eta: 10,
+                    } as MessageUpdate;
+
+                    if (!map) {
+                        yield {
+                            type: MessageUpdateType.Tool,
+                            subtype: MessageToolUpdateType.Error,
+                            uuid,
+                            message: `Unknown MCP function: ${fnName}`,
+                        } as MessageUpdate;
+                        yield {
+                            type: MessageUpdateType.FinalAnswer,
+                            text: `Unknown MCP function: ${fnName}`,
+                            interrupted: false,
+                        } as MessageUpdate;
+                        return; // done
+                    }
+
+                    try {
+                        const server = servers.find((s) => s.name === map.server)!;
+                        const out = await callMcpTool(server, map.tool, argsObj);
+
+                        yield {
+                            type: MessageUpdateType.Tool,
+                            subtype: MessageToolUpdateType.Result,
+                            uuid,
+                            result: {
+                                status: "success",
+                                call: { name: fnName, parameters: parametersClean },
+                                outputs: [{ content: out }],
+                                display: true,
+                            },
+                        } as MessageUpdate;
+
+                        yield {
+                            type: MessageUpdateType.FinalAnswer,
+                            text: out,
+                            interrupted: false,
+                        } as MessageUpdate;
+                    } catch (e) {
+                        const msg = e instanceof Error ? e.message : String(e);
+                        yield {
+                            type: MessageUpdateType.Tool,
+                            subtype: MessageToolUpdateType.Error,
+                            uuid,
+                            message: msg,
+                        } as MessageUpdate;
+
+                        yield {
+                            type: MessageUpdateType.FinalAnswer,
+                            text: `MCP error: ${msg}`,
+                            interrupted: false,
+                        } as MessageUpdate;
+                    }
+
+                    return; // handled by MCP tool path; stop normal LLM stream
+                }
+                // No tool call selected -> fall through to normal LLM stream
+            }
+        }
+    } catch (e) {
+        logger.warn({ err: e }, "MCP tool flow failed; falling back to normal LLM stream");
+    }
+
 	// reasoning mode is false by default
 	let reasoning = false;
 	let reasoningBuffer = "";
