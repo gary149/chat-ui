@@ -161,6 +161,7 @@ export async function* generate(
                         const server = servers.find((s) => s.name === map.server)!;
                         const out = await callMcpTool(server, map.tool, argsObj);
 
+                        // Emit tool result for the UI panel
                         yield {
                             type: MessageUpdateType.Tool,
                             subtype: MessageToolUpdateType.Result,
@@ -173,9 +174,23 @@ export async function* generate(
                             },
                         } as MessageUpdate;
 
+                        // Ask the model to synthesize an answer using the tool output (single follow-up call)
+                        const question = messages[messages.length - 1]?.content ?? "";
+                        const synthesis = yield* generateFromDefaultEndpoint({
+                            messages: [
+                                {
+                                    from: "user",
+                                    content: `Question: ${question}\n\nTool results:\n${out}\n\nUsing only the tool results above, answer the question concisely. If uncertain, say you don't know.`,
+                                },
+                            ],
+                            preprompt: "You are a helpful assistant. Use the provided tool results as the sole source of truth.",
+                            generateSettings: { temperature: 0.2, max_new_tokens: 512 },
+                            modelId: model.id,
+                        });
+
                         yield {
                             type: MessageUpdateType.FinalAnswer,
-                            text: out,
+                            text: synthesis,
                             interrupted: false,
                         } as MessageUpdate;
                     } catch (e) {
