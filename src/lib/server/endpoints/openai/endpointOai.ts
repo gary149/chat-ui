@@ -18,6 +18,7 @@ import type { MessageFile } from "$lib/types/Message";
 import type { EndpointMessage } from "../endpoints";
 // uuid import removed (no tool call ids)
 import { callMcpTool, type McpServerConfig } from "$lib/server/mcp/httpClient";
+import { getOpenAiToolsForMcp } from "$lib/server/mcp/tools";
 
 export const endpointOAIParametersSchema = z.object({
 	weight: z.number().int().positive().default(1),
@@ -219,6 +220,159 @@ export async function endpointOai(
                 // fall through to normal LLM flow
             }
             // --- end MCP hook ---
+
+            // --- MCP model-driven tool-calls ---
+            try {
+                const serversRaw = (config as any).MCP_SERVERS || "[]";
+                let servers: McpServerConfig[] = [];
+                try { servers = JSON.parse(serversRaw || "[]"); } catch { servers = []; }
+                const mcpEnabled = Array.isArray(servers) && servers.length > 0;
+
+                if (mcpEnabled) {
+                    // Build OpenAI-compatible tool defs by querying MCP servers
+                    const { tools: oaTools, mapping } = await getOpenAiToolsForMcp(servers);
+
+                    if (oaTools.length > 0) {
+                        // Prepare messages (already done below) and create a non-streaming call so we can inspect tool_calls
+                        let messagesOpenAI: OpenAI.Chat.Completions.ChatCompletionMessageParam[] =
+                            await prepareMessages(
+                                messages,
+                                imageProcessor,
+                                isMultimodal ?? model.multimodal
+                            );
+
+                        const hasSystemMessage = messagesOpenAI.length > 0 && messagesOpenAI[0]?.role === "system";
+                        if (hasSystemMessage) {
+                            if (preprompt !== undefined) {
+                                const userSystemPrompt = messagesOpenAI[0].content || "";
+                                messagesOpenAI[0].content = preprompt + (userSystemPrompt ? "\n\n" + userSystemPrompt : "");
+                            }
+                        } else {
+                            messagesOpenAI = [{ role: "system", content: preprompt ?? "" }, ...messagesOpenAI];
+                        }
+                        if (!model.systemRoleSupported && messagesOpenAI.length > 0 && messagesOpenAI[0]?.role === "system") {
+                            messagesOpenAI[0] = { ...messagesOpenAI[0], role: "user" } as any;
+                        }
+
+                        const parameters = { ...model.parameters, ...generateSettings };
+                        const baseBody = {
+                            model: model.id ?? model.name,
+                            messages: messagesOpenAI,
+                            stream: false,
+                            ...(useCompletionTokens
+                                ? { max_completion_tokens: parameters?.max_new_tokens }
+                                : { max_tokens: parameters?.max_new_tokens }),
+                            stop: parameters?.stop,
+                            temperature: parameters?.temperature,
+                            top_p: parameters?.top_p,
+                            frequency_penalty: parameters?.repetition_penalty,
+                            presence_penalty: parameters?.presence_penalty,
+                        } as any;
+
+                        const bodyWithTools = { ...baseBody, tools: oaTools, tool_choice: "auto" };
+
+                        const completion = await openai.chat.completions.create(
+                            bodyWithTools as any,
+                            {
+                                body: { ...bodyWithTools, ...extraBody },
+                                headers: {
+                                    "ChatUI-Conversation-ID": conversationId?.toString() ?? "",
+                                    "X-use-cache": "false",
+                                },
+                            }
+                        );
+
+                        const call = completion.choices?.[0]?.message?.tool_calls?.[0];
+                        if (call?.type === "function" && call.function?.name) {
+                            const fnName = call.function.name;
+                            const map = mapping[fnName];
+                            if (!map) {
+                                const fake = {
+                                    id: "mcp-map-error",
+                                    object: "chat.completion",
+                                    created: Math.floor(Date.now() / 1000),
+                                    model: model.id ?? model.name,
+                                    choices: [
+                                        {
+                                            index: 0,
+                                            finish_reason: "stop",
+                                            logprobs: null,
+                                            message: { role: "assistant", content: `Unknown MCP function: ${fnName}` },
+                                        },
+                                    ],
+                                } as any;
+                                return openAIChatToTextGenerationSingle(fake);
+                            }
+
+                            let args: unknown = {};
+                            const raw = call.function.arguments ?? "";
+                            if (raw && String(raw).trim()) {
+                                try { args = JSON.parse(raw); } catch (e) {
+                                    const msg = e instanceof Error ? e.message : String(e);
+                                    const fake = {
+                                        id: "mcp-args-error",
+                                        object: "chat.completion",
+                                        created: Math.floor(Date.now() / 1000),
+                                        model: model.id ?? model.name,
+                                        choices: [
+                                            {
+                                                index: 0,
+                                                finish_reason: "stop",
+                                                logprobs: null,
+                                                message: { role: "assistant", content: `Invalid JSON args: ${msg}` },
+                                            },
+                                        ],
+                                    } as any;
+                                    return openAIChatToTextGenerationSingle(fake);
+                                }
+                            }
+
+                            const server = servers.find((s) => s.name === map.server)!;
+                            try {
+                                const out = await callMcpTool(server, map.tool, args);
+                                const fake = {
+                                    id: "mcp-ok",
+                                    object: "chat.completion",
+                                    created: Math.floor(Date.now() / 1000),
+                                    model: model.id ?? model.name,
+                                    choices: [
+                                        {
+                                            index: 0,
+                                            finish_reason: "stop",
+                                            logprobs: null,
+                                            message: { role: "assistant", content: out },
+                                        },
+                                    ],
+                                } as any;
+                                return openAIChatToTextGenerationSingle(fake);
+                            } catch (e) {
+                                const msg = e instanceof Error ? e.message : String(e);
+                                const fake = {
+                                    id: "mcp-call-error",
+                                    object: "chat.completion",
+                                    created: Math.floor(Date.now() / 1000),
+                                    model: model.id ?? model.name,
+                                    choices: [
+                                        {
+                                            index: 0,
+                                            finish_reason: "stop",
+                                            logprobs: null,
+                                            message: { role: "assistant", content: `MCP error: ${msg}` },
+                                        },
+                                    ],
+                                } as any;
+                                return openAIChatToTextGenerationSingle(fake);
+                            }
+                        }
+
+                        // No tool call: return model content
+                        return openAIChatToTextGenerationSingle(completion as any);
+                    }
+                }
+            } catch {
+                // fall through to normal flow
+            }
+            // --- end MCP model-driven tool-calls ---
 			// Format messages for the chat API, handling multimodal content if supported
             let messagesOpenAI: OpenAI.Chat.Completions.ChatCompletionMessageParam[] =
                 await prepareMessages(
