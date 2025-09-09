@@ -10,63 +10,121 @@ export async function* openAIChatToTextGenerationStream(
 ) {
 	let generatedText = "";
 	let tokenId = 0;
-	let toolBuffer = ""; // legacy hack kept harmless
+
+	// Track streamed tool-call argument buffers by index
+	const toolArgBuffers: Record<number, { id?: string; name?: string; args: string }> = {};
+
+	// Track parsing of tool-result header (Tool[name] id\n)
+	let pendingToolHeader: string | null = null;
+	let currentToolName: string | undefined;
+	let currentToolId: string | undefined;
 
 	for await (const completion of completionStream) {
 		const { choices } = completion;
-		const content = choices[0]?.delta?.content ?? "";
-		const last = choices[0]?.finish_reason === "stop" || choices[0]?.finish_reason === "length";
+		const delta = choices?.[0]?.delta ?? {};
+		const finishReason = choices?.[0]?.finish_reason;
+		const last = finishReason === "stop" || finishReason === "length";
 
-		// if the last token is a stop and the tool buffer is not empty, yield it as a generated_text
-		if (choices[0]?.finish_reason === "stop" && toolBuffer.length > 0) {
-			yield {
-				token: {
-					id: tokenId++,
-					special: true,
-					logprob: 0,
-					text: "",
-				},
-				generated_text: toolBuffer,
-				details: null,
-			} as TextGenerationStreamOutput;
-			break;
-		}
+		const roleDelta = (delta as any).role as string | undefined;
+		const reasoningContent = (delta as any).reasoning_content as string | undefined;
+		const toolCalls = (delta as any).tool_calls as
+			| undefined
+			| Array<{
+				index?: number;
+				id?: string;
+				type?: string;
+				function?: { name?: string | null; arguments?: string };
+			}>;
 
-		// weird bug where the parameters are streamed in like this
-		if (choices[0]?.delta?.tool_calls) {
-			const calls = Array.isArray(choices[0].delta.tool_calls)
-				? choices[0].delta.tool_calls
-				: [choices[0].delta.tool_calls];
-
-			if (
-				calls.length === 1 &&
-				calls[0].index === 0 &&
-				calls[0].id === "" &&
-				calls[0].type === "function" &&
-				!!calls[0].function &&
-				calls[0].function.name === null
-			) {
-				toolBuffer += calls[0].function.arguments;
-				continue;
-			}
-		}
-
-		if (content) {
-			generatedText = generatedText + content;
-		}
-		const output: TextGenerationStreamOutput = {
+		// Prepare base output; fill fields conditionally below
+		const out: any = {
 			token: {
 				id: tokenId++,
-				text: content ?? "",
+				text: "",
 				logprob: 0,
-				special: last,
+				special: last ?? false,
 			},
-			generated_text: last ? generatedText : null,
-			details: null,
-		};
-		yield output;
+			generated_text: null as string | null,
+			details: null as any,
+		} as TextGenerationStreamOutput;
 
-		// Tools removed: ignore tool_calls deltas
+		// Map GLM-4.5 "reasoning_content" to side-channel
+		if (typeof reasoningContent === "string" && reasoningContent.length > 0) {
+			(out as any).reasoningDelta = reasoningContent;
+		}
+
+		// Handle tool call deltas (streaming function arguments)
+		if (toolCalls && toolCalls.length > 0) {
+			const deltas = Array.isArray(toolCalls) ? toolCalls : [toolCalls as any];
+			const mapped = [] as Array<{ index: number; id?: string; name?: string; argumentsChunk?: string }>;
+			for (const c of deltas) {
+				const index = typeof c.index === "number" ? c.index : 0;
+				const id = c.id || undefined;
+				const name = c.function?.name ?? undefined;
+				const argChunk = c.function?.arguments ?? undefined;
+
+				// Maintain local buffers for callers to optionally parse later
+				const buf = (toolArgBuffers[index] = toolArgBuffers[index] || { args: "" });
+				if (id) buf.id = id;
+				if (name && name !== null) buf.name = name;
+				if (typeof argChunk === "string") buf.args += argChunk;
+
+				mapped.push({ index, id, name, argumentsChunk: argChunk });
+			}
+			(out as any).toolCallDeltas = mapped;
+		}
+
+		// Handle tool results streamed as role: "tool", content: "Tool[name] id\n..."
+		if (roleDelta === "tool") {
+			let chunk = typeof delta.content === "string" ? (delta.content as string) : "";
+			if (pendingToolHeader !== null || !currentToolName) {
+				pendingToolHeader = (pendingToolHeader ?? "") + chunk;
+				const newlineIndex = pendingToolHeader.indexOf("\n");
+				if (newlineIndex !== -1) {
+					const header = pendingToolHeader.slice(0, newlineIndex);
+					const rest = pendingToolHeader.slice(newlineIndex + 1);
+					// Parse header: Tool[name] id
+					const m = /^\s*Tool\[([^\]]+)\]\s+(\S+)\s*$/.exec(header);
+					if (m) {
+						currentToolName = m[1];
+						currentToolId = m[2];
+					}
+					pendingToolHeader = null;
+					(out as any).toolResultDelta = {
+						name: currentToolName,
+						id: currentToolId,
+						contentChunk: rest,
+					};
+				} else {
+					// Still waiting for a full header line; do not emit yet
+					(out as any).toolResultDelta = {
+						name: undefined,
+						id: undefined,
+						contentChunk: "",
+					};
+				}
+			} else {
+				// Header was parsed; stream content chunks
+				(out as any).toolResultDelta = {
+					name: currentToolName,
+					id: currentToolId,
+					contentChunk: chunk,
+				};
+			}
+			// For tool role chunks, do not mix into assistant content stream
+			yield out;
+			continue;
+		}
+
+		// Normal assistant content streaming
+		const content = typeof delta.content === "string" ? (delta.content as string) : "";
+		if (content) {
+			generatedText += content;
+			(out as any).token.text = content;
+			out.generated_text = last ? generatedText : null;
+		}
+
+		yield out as TextGenerationStreamOutput;
 	}
 }
 

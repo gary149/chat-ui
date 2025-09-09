@@ -17,10 +17,12 @@
 		type MessageReasoningUpdate,
 		MessageReasoningUpdateType,
 	} from "$lib/types/MessageUpdate";
+	import type { MessageToolUpdate } from "$lib/types/MessageUpdate";
 	import MarkdownRenderer from "./MarkdownRenderer.svelte";
 	import OpenReasoningResults from "./OpenReasoningResults.svelte";
 	import Alternatives from "./Alternatives.svelte";
 	import MessageAvatar from "./MessageAvatar.svelte";
+	import ToolUpdate from "./ToolUpdate.svelte";
 
 	interface Props {
 		message: Message;
@@ -73,6 +75,67 @@
 			({ type }) => type === MessageUpdateType.FinalAnswer
 		) as MessageFinalAnswerUpdate
 	);
+
+	// Group tool updates by uuid for rendering
+	let toolUpdates = $derived(
+		message.updates
+			?.filter(({ type }) => type === MessageUpdateType.Tool)
+			.reduce(
+				(acc, update) => {
+					// type guard at runtime
+					const u = update as unknown as MessageToolUpdate;
+					acc[u.uuid] = acc[u.uuid] ?? [];
+					acc[u.uuid].push(u);
+					return acc;
+				},
+				{} as Record<string, MessageToolUpdate[]>
+			)
+	);
+
+	let hasToolUpdates = $derived(
+		!!toolUpdates && Object.values(toolUpdates).some((t) => (t?.length ?? 0) > 0)
+	);
+
+	// Compute inline sections by anchor order: text slices + tool blocks
+	type Section =
+		| { kind: "text"; text: string }
+		| { kind: "tool"; tool: MessageToolUpdate[] };
+
+	// Precompute anchored groups for inline rendering
+	let anchoredGroups = $derived(
+		!hasToolUpdates
+			? []
+			: Object.values(toolUpdates ?? {})
+					.map((group) => ({
+						group,
+						anchor: Math.min(
+							...group
+								.map((u) => (u as any).anchor as number | undefined)
+								.filter((v): v is number => typeof v === "number")
+						),
+					}))
+					.filter((g) => Number.isFinite(g.anchor))
+	);
+
+	let hasAnchoredToolSections = $derived((anchoredGroups?.length ?? 0) > 0);
+
+	let sections: Section[] = $derived((() => {
+		if (!hasAnchoredToolSections) return [{ kind: "text", text: message.content }] as Section[];
+
+		// Sort by anchor ascending; stable order preserved
+		const sorted = [...anchoredGroups].sort((a, b) => (a.anchor ?? 0) - (b.anchor ?? 0));
+
+		const out: Section[] = [];
+		let cursor = 0;
+		for (const g of sorted) {
+			const pos = Math.max(0, Math.min(g.anchor ?? 0, message.content.length));
+			if (pos > cursor) out.push({ kind: "text", text: message.content.slice(cursor, pos) });
+			out.push({ kind: "tool", tool: g.group });
+			cursor = pos;
+		}
+		if (cursor < message.content.length) out.push({ kind: "text", text: message.content.slice(cursor) });
+		return out;
+	})());
 	let urlNotTrailing = $derived(page.url.pathname.replace(/\/$/, ""));
 	// let downloadLink = $derived(urlNotTrailing + `/message/${message.id}/prompt`);
 
@@ -148,6 +211,16 @@
 				/>
 			{/if}
 
+				{#if toolUpdates && !hasAnchoredToolSections}
+				{#each Object.values(toolUpdates) as tool}
+					{#if tool.length}
+						{#key tool[0].uuid}
+							<ToolUpdate {tool} {loading} />
+						{/key}
+					{/if}
+				{/each}
+			{/if}
+
 			<div bind:this={contentEl}>
 				{#if isLast && loading && message.content.length === 0}
 					<IconLoading classNames="loading inline ml-2 first:ml-0" />
@@ -176,16 +249,26 @@
 						{/if}
 					{/each}
 				{:else}
-					<div
-						class="prose max-w-none dark:prose-invert max-sm:prose-sm prose-headings:font-semibold prose-h1:text-lg prose-h2:text-base prose-h3:text-base prose-pre:bg-gray-800 dark:prose-pre:bg-gray-900"
-					>
-						<MarkdownRenderer content={message.content} />
-					</div>
+					{#each sections as section, i}
+						{#if section.kind === "text"}
+							{#if section.text.trim().length > 0}
+								<div
+									class="prose max-w-none dark:prose-invert max-sm:prose-sm prose-headings:font-semibold prose-h1:text-lg prose-h2:text-base prose-h3:text-base prose-pre:bg-gray-800 dark:prose-pre:bg-gray-900"
+								>
+									{#key section.text}
+										<MarkdownRenderer content={section.text.replace(/<\/?think>/gi, "")} />
+									{/key}
+								</div>
+							{/if}
+						{:else}
+							<ToolUpdate tool={section.tool} {loading} />
+						{/if}
+					{/each}
 				{/if}
 			</div>
 		</div>
 
-		{#if !loading && message.content}
+		{#if !loading && (message.content || hasToolUpdates)}
 			<div class="absolute -bottom-3.5 right-1 flex items-center gap-0.5">
 				<CopyToClipBoardBtn
 					onClick={() => {

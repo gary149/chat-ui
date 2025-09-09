@@ -15,5 +15,8 @@ type WebSearchSource = {
 type TextGenerationStreamOutputWithToolsAndWebSources = import("@huggingface/inference").TextGenerationStreamOutput & {
   webSources?: WebSearchSource[];
   toolCalls?: unknown[];
-  toolCallDelta?: unknown;
+  toolCallDelta?: unknown; // legacy singular delta
+  toolCallDeltas?: unknown[]; // preferred plural form
+  toolResultDelta?: unknown;
+  reasoningDelta?: string;
 };
