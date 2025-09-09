@@ -1,8 +1,13 @@
 import type { MessageFile } from "$lib/types/Message";
 import {
-	type MessageUpdate,
-	type MessageStreamUpdate,
-	MessageUpdateType,
+    type MessageUpdate,
+    type MessageStreamUpdate,
+    MessageUpdateType,
+    MessageToolUpdateType,
+    type MessageToolUpdate,
+    type MessageToolCallUpdate,
+    type MessageToolErrorUpdate,
+    type MessageToolResultUpdate,
 } from "$lib/types/MessageUpdate";
 
 import { page } from "$app/state";
@@ -65,6 +70,20 @@ export async function fetchMessageUpdates(
 		streamMessageUpdatesToFullWords(endpointStreamToIterator(response, abortController))
 	);
 }
+
+// Tool update type guards (restored for UI rendering)
+export const isMessageToolUpdate = (update: MessageUpdate): update is MessageToolUpdate =>
+    // @ts-expect-error – union includes Tool when available
+    update.type === MessageUpdateType.Tool;
+export const isMessageToolCallUpdate = (
+    update: MessageUpdate
+): update is MessageToolCallUpdate => isMessageToolUpdate(update) && update.subtype === MessageToolUpdateType.Call;
+export const isMessageToolResultUpdate = (
+    update: MessageUpdate
+): update is MessageToolResultUpdate => isMessageToolUpdate(update) && update.subtype === MessageToolUpdateType.Result;
+export const isMessageToolErrorUpdate = (
+    update: MessageUpdate
+): update is MessageToolErrorUpdate => isMessageToolUpdate(update) && update.subtype === MessageToolUpdateType.Error;
 
 async function* endpointStreamToIterator(
 	response: Response,

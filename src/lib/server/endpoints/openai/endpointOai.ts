@@ -17,6 +17,7 @@ import { createImageProcessorOptionsValidator, makeImageProcessor } from "../ima
 import type { MessageFile } from "$lib/types/Message";
 import type { EndpointMessage } from "../endpoints";
 // uuid import removed (no tool call ids)
+// MCP integration handled in text generation layer
 
 export const endpointOAIParametersSchema = z.object({
 	weight: z.number().int().positive().default(1),
