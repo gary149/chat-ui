@@ -111,12 +111,20 @@ if (openaiBaseUrl) {
 		const listSchema = z
 			.object({
 				data: z.array(
-					z.object({
-						id: z.string(),
-						providers: z
-							.array(z.object({ supports_tools: z.boolean().optional() }).passthrough())
-							.optional(),
-					})
+					z
+						.object({
+							id: z.string(),
+							providers: z
+								.array(z.object({ supports_tools: z.boolean().optional() }).passthrough())
+								.optional(),
+							architecture: z
+								.object({
+									input_modalities: z.array(z.string()).optional(),
+									output_modalities: z.array(z.string()).optional(),
+								})
+								.optional(),
+						})
+						.passthrough()
 				),
 			})
 			.passthrough();
@@ -130,12 +138,18 @@ if (openaiBaseUrl) {
 				const org = m.id.split("/")[0];
 				logoUrl = `https://huggingface.co/api/organizations/${encodeURIComponent(org)}/avatar?redirect=true`;
 			}
+			// Auto-detect multimodal (image) capability when using the HF router base URL
+			const inputModalities: string[] | undefined = m.architecture?.input_modalities as
+				| string[]
+				| undefined;
+			const supportsImage = isHFRouter && (inputModalities?.includes("image") ?? false);
 			return {
 				id: m.id,
 				name: m.id,
 				displayName: m.id,
 				logoUrl,
 				providers: m.providers,
+				multimodal: supportsImage,
 				endpoints: [
 					{
 						type: "openai" as const,
