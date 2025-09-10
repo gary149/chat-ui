@@ -150,6 +150,7 @@
 								class="absolute hidden size-0"
 								aria-label="Upload file"
 								type="file"
+								multiple
 								onchange={onFileChange}
 								accept={mimeTypes.join(",")}
 							/>
