@@ -1,5 +1,4 @@
 import { assert, it, describe, afterEach, vi, expect } from "vitest";
-import type { Cookies } from "@sveltejs/kit";
 import { collections } from "$lib/server/database";
 import { updateUser } from "./updateUser";
 import { ObjectId } from "mongodb";
@@ -21,10 +20,7 @@ const locals = {
 	isAdmin: false,
 };
 
-// @ts-expect-error SvelteKit cookies dumb mock
-const cookiesMock: Cookies = {
-	set: vi.fn(),
-};
+const setSessionCookie = vi.fn();
 
 const insertRandomUser = async () => {
 	const res = await collections.users.insertOne({
@@ -61,13 +57,13 @@ describe("login", () => {
 	it("should update user if existing", async () => {
 		await insertRandomUser();
 
-		await updateUser({ userData, locals, cookies: cookiesMock });
+		await updateUser({ userData, locals, setSessionCookie });
 
 		const existingUser = await collections.users.findOne({ hfUserId: userData.sub });
 
 		assert.equal(existingUser?.name, userData.name);
 
-		expect(cookiesMock.set).toBeCalledTimes(1);
+		expect(setSessionCookie).toBeCalledTimes(1);
 	});
 
 	it("should migrate pre-existing conversations for new user", async () => {
@@ -75,7 +71,7 @@ describe("login", () => {
 
 		await insertRandomConversations(2);
 
-		await updateUser({ userData, locals, cookies: cookiesMock });
+		await updateUser({ userData, locals, setSessionCookie });
 
 		const conversationCount = await collections.conversations.countDocuments({
 			userId: insertedId,
@@ -88,7 +84,7 @@ describe("login", () => {
 	});
 
 	it("should create default settings for new user", async () => {
-		await updateUser({ userData, locals, cookies: cookiesMock });
+		await updateUser({ userData, locals, setSessionCookie });
 
 		const user = await findUser(locals.sessionId);
 
@@ -96,26 +92,26 @@ describe("login", () => {
 
 		const settings = await collections.settings.findOne({ userId: user?._id });
 
-    expect(settings).toMatchObject({
-        userId: user?._id,
-        updatedAt: expect.any(Date),
-        createdAt: expect.any(Date),
-        ...DEFAULT_SETTINGS,
-    });
+		expect(settings).toMatchObject({
+			userId: user?._id,
+			updatedAt: expect.any(Date),
+			createdAt: expect.any(Date),
+			...DEFAULT_SETTINGS,
+		});
 
 		await collections.settings.deleteOne({ userId: user?._id });
 	});
 
 	it("should migrate pre-existing settings for pre-existing user", async () => {
-    const { insertedId } = await collections.settings.insertOne({
-        sessionId: locals.sessionId,
-        updatedAt: new Date(),
-        createdAt: new Date(),
-        ...DEFAULT_SETTINGS,
-        shareConversationsWithModelAuthors: false,
-    });
+		const { insertedId } = await collections.settings.insertOne({
+			sessionId: locals.sessionId,
+			updatedAt: new Date(),
+			createdAt: new Date(),
+			...DEFAULT_SETTINGS,
+			shareConversationsWithModelAuthors: false,
+		});
 
-		await updateUser({ userData, locals, cookies: cookiesMock });
+		await updateUser({ userData, locals, setSessionCookie });
 
 		const settings = await collections.settings.findOne({
 			_id: insertedId,
@@ -126,13 +122,13 @@ describe("login", () => {
 
 		const user = await collections.users.findOne({ hfUserId: userData.sub });
 
-    expect(settings).toMatchObject({
-        userId: user?._id,
-        updatedAt: expect.any(Date),
-        createdAt: expect.any(Date),
-        ...DEFAULT_SETTINGS,
-        shareConversationsWithModelAuthors: false,
-    });
+		expect(settings).toMatchObject({
+			userId: user?._id,
+			updatedAt: expect.any(Date),
+			createdAt: expect.any(Date),
+			...DEFAULT_SETTINGS,
+			shareConversationsWithModelAuthors: false,
+		});
 
 		await collections.settings.deleteOne({ userId: user?._id });
 	});

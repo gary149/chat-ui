@@ -16,6 +16,9 @@ const prefix = `${base}/api/v2` as unknown as "";
 
 export const app = new Elysia({ prefix })
 	.mapResponse(({ response, request }) => {
+		if (response instanceof Response) {
+			return response;
+		}
 		// Skip the /export endpoint
 		if (request.url.endsWith("/export")) {
 			return response as unknown as Response;

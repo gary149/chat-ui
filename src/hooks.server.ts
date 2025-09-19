@@ -163,7 +163,8 @@ export const handle: Handle = async ({ event, resolve }) => {
 	if (
 		event.request.method === "POST" ||
 		event.url.pathname.startsWith(`${base}/login`) ||
-		event.url.pathname.startsWith(`${base}/login/callback`)
+		event.url.pathname.startsWith(`${base}/login/callback`) ||
+		event.url.pathname.startsWith(`${base}/api/v2/login`)
 	) {
 		// if the request is a POST request or login-related we refresh the cookie
 		refreshSessionCookie(event.cookies, auth.secretSessionId);
@@ -176,6 +177,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 
 	if (
 		!event.url.pathname.startsWith(`${base}/login`) &&
+		!event.url.pathname.startsWith(`${base}/api/v2/login`) &&
 		!event.url.pathname.startsWith(`${base}/admin`) &&
 		!event.url.pathname.startsWith(`${base}/settings`) &&
 		!["GET", "OPTIONS", "HEAD"].includes(event.request.method)
@@ -215,7 +217,8 @@ export const handle: Handle = async ({ event, resolve }) => {
 
 	if (
 		event.url.pathname.startsWith(`${base}/login/callback`) ||
-		event.url.pathname.startsWith(`${base}/login`)
+		event.url.pathname.startsWith(`${base}/login`) ||
+		event.url.pathname.startsWith(`${base}/api/v2/login`)
 	) {
 		response.headers.append("Cache-Control", "no-store");
 	}

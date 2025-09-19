@@ -1,10 +1,9 @@
-import { refreshSessionCookie } from "$lib/server/auth";
 import { collections } from "$lib/server/database";
 import { ObjectId } from "mongodb";
 import { DEFAULT_SETTINGS } from "$lib/types/Settings";
 import { z } from "zod";
 import type { UserinfoResponse } from "openid-client";
-import { error, type Cookies } from "@sveltejs/kit";
+import { error } from "@sveltejs/kit";
 import crypto from "crypto";
 import { sha256 } from "$lib/utils/sha256";
 import { addWeeks } from "date-fns";
@@ -15,11 +14,11 @@ import { logger } from "$lib/server/logger";
 export async function updateUser(params: {
 	userData: UserinfoResponse;
 	locals: App.Locals;
-	cookies: Cookies;
+	setSessionCookie: (sessionSecret: string) => void;
 	userAgent?: string;
 	ip?: string;
 }) {
-	const { userData, locals, cookies, userAgent, ip } = params;
+	const { userData, locals, setSessionCookie, userAgent, ip } = params;
 
 	// Microsoft Entra v1 tokens do not provide preferred_username, instead the username is provided in the upn
 	// claim. See https://learn.microsoft.com/en-us/entra/identity-platform/access-token-claims-reference
@@ -186,8 +185,8 @@ export async function updateUser(params: {
 		}
 	}
 
-	// refresh session cookie
-	refreshSessionCookie(cookies, secretSessionId);
+	// refresh session cookie via caller-provided setter
+	setSessionCookie(secretSessionId);
 
 	// migrate pre-existing conversations
 	await collections.conversations.updateMany(

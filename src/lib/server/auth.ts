@@ -17,6 +17,7 @@ import { logger } from "$lib/server/logger";
 import { ObjectId } from "mongodb";
 import type { Cookie } from "elysia";
 import { adminTokenManager } from "./adminToken";
+import { serialize } from "cookie";
 
 export interface OIDCSettings {
 	redirectURI: string;
@@ -61,15 +62,36 @@ const secure = z
 	.default(!(dev || config.ALLOW_INSECURE_COOKIES === "true"))
 	.parse(config.COOKIE_SECURE === "" ? undefined : config.COOKIE_SECURE === "true");
 
+const baseSessionCookieOptions = {
+	path: "/",
+	// So that it works inside the space's iframe and mirrors legacy SvelteKit cookie settings
+	sameSite,
+	secure,
+	httpOnly: true,
+} as const;
+
+const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 14; // 2 weeks
+
+export const buildSessionCookieOptions = () => ({
+	...baseSessionCookieOptions,
+	expires: addWeeks(new Date(), 2),
+	maxAge: SESSION_MAX_AGE_SECONDS,
+});
+
+export const buildSessionDeletionCookieOptions = () => ({
+	...baseSessionCookieOptions,
+	expires: new Date(0),
+	maxAge: 0,
+});
+
+export const serializeSessionCookie = (sessionId: string) =>
+	serialize(config.COOKIE_NAME, sessionId, buildSessionCookieOptions());
+
+export const serializeSessionDeletionCookie = () =>
+	serialize(config.COOKIE_NAME, "", buildSessionDeletionCookieOptions());
+
 export function refreshSessionCookie(cookies: Cookies, sessionId: string) {
-	cookies.set(config.COOKIE_NAME, sessionId, {
-		path: "/",
-		// So that it works inside the space's iframe
-		sameSite,
-		secure,
-		httpOnly: true,
-		expires: addWeeks(new Date(), 2),
-	});
+	cookies.set(config.COOKIE_NAME, sessionId, buildSessionCookieOptions());
 }
 
 export async function findUser(sessionId: string) {

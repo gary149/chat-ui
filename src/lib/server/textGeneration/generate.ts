@@ -59,7 +59,7 @@ export async function* generate(
 		conversationId: conv._id,
 	})) {
 		// Check if this output contains router metadata
-		if ('routerMetadata' in output && output.routerMetadata) {
+		if ("routerMetadata" in output && output.routerMetadata) {
 			yield {
 				type: MessageUpdateType.RouterMetadata,
 				route: output.routerMetadata.route,
