@@ -127,6 +127,10 @@ npm install
 npm run dev
 ```
 
+## API
+
+As of September 2025, the legacy SvelteKit `/api/*` routes have been removed in favor of the Elysia-powered `/api/v2` surface. Custom integrations should migrate to the new endpoints or reuse the bundled Treaty client (`$lib/APIClient`) so behaviour stays in sync with the SPA.
+
 ## Extra parameters
 
 ### OpenID connect
