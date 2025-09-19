@@ -132,12 +132,16 @@
 		if (page.url.searchParams.has("token")) {
 			const token = page.url.searchParams.get("token");
 
-			await fetch(`${base}/api/user/validate-token`, {
-				method: "POST",
-				body: JSON.stringify({ token }),
-			}).then(() => {
-				goto(`${base}/`, { invalidateAll: true });
-			});
+			if (token) {
+				await client.user["validate-token"]
+					.post({ token })
+					.then(handleResponse)
+					.catch((err) => {
+						console.error(err);
+					});
+			}
+
+			goto(`${base}/`, { invalidateAll: true });
 		}
 
 		// Global keyboard shortcut: New Chat (Ctrl/Cmd + Shift + O)

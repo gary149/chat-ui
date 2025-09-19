@@ -3,6 +3,9 @@
 	import { base } from "$app/paths";
 	import { page } from "$app/state";
 	import { usePublicConfig } from "$lib/utils/PublicConfig.svelte";
+	import { handleResponse, useAPIClient } from "$lib/APIClient";
+	import type { Treaty } from "@elysiajs/eden";
+	import { parseTreatyError } from "$lib/utils/apiError";
 
 	const publicConfig = usePublicConfig();
 
@@ -15,11 +18,17 @@
 
 	let { data } = $props();
 
+	const client = useAPIClient();
+
 	let hasModels = $derived(Boolean(data.models?.length));
 	let loading = $state(false);
 	let files: File[] = $state([]);
 
 	const settings = useSettingsStore();
+
+	function getErrorMessage(error: unknown) {
+		return parseTreatyError(error, ERROR_MESSAGES.default);
+	}
 
 	async function createConversation(message: string) {
 		try {
@@ -37,25 +46,14 @@
 			} else {
 				model = data.models[0].id;
 			}
-			const res = await fetch(`${base}/conversation`, {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify({
-					model,
-					preprompt: $settings.customPrompts[$settings.activeModel],
-				}),
+			const response = await client.conversations.post({
+				model,
+				preprompt: $settings.customPrompts[$settings.activeModel],
 			});
 
-			if (!res.ok) {
-				const errorMessage = (await res.json()).message || ERROR_MESSAGES.default;
-				error.set(errorMessage);
-				console.error("Error while creating conversation: ", errorMessage);
-				return;
-			}
-
-			const { conversationId } = await res.json();
+			const { conversationId } = handleResponse<{ 200: { conversationId: string } }>(
+				response as Treaty.TreatyResponse<{ 200: { conversationId: string } }>
+			);
 
 			// Ugly hack to use a store as temp storage, feel free to improve ^^
 			pendingMessage.set({
@@ -66,7 +64,8 @@
 			// invalidateAll to update list of conversations
 			await goto(`${base}/conversation/${conversationId}`, { invalidateAll: true });
 		} catch (err) {
-			error.set((err as Error).message || ERROR_MESSAGES.default);
+			const message = getErrorMessage(err);
+			error.set(message);
 			console.error(err);
 		} finally {
 			loading = false;

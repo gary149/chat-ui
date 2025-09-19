@@ -1,7 +1,9 @@
 import { browser } from "$app/environment";
 import { invalidate } from "$app/navigation";
-import { base } from "$app/paths";
 import { UrlDependency } from "$lib/types/UrlDependency";
+import { handleResponse, useAPIClient } from "$lib/APIClient";
+import type { Treaty } from "@elysiajs/eden";
+import { parseTreatyError } from "$lib/utils/apiError";
 import { getContext, setContext } from "svelte";
 import { type Writable, writable, get } from "svelte/store";
 
@@ -30,6 +32,51 @@ export function createSettingsStore(initialValue: Omit<SettingsStore, "recentlyS
 	const baseStore = writable({ ...initialValue, recentlySaved: false });
 
 	let timeoutId: NodeJS.Timeout;
+	const client = useAPIClient();
+
+	type SettingsAPIResponse = {
+		shareConversationsWithModelAuthors: boolean;
+		welcomeModalSeen: boolean;
+		welcomeModalSeenAt: string | null;
+		activeModel: string;
+		customPrompts: Record<string, string>;
+		multimodalOverrides: Record<string, boolean>;
+		disableStream: boolean;
+		directPaste: boolean;
+		hidePromptExamples: Record<string, boolean>;
+	};
+
+	const normalizeResponse = (data: SettingsAPIResponse): Omit<SettingsStore, "recentlySaved"> => ({
+		shareConversationsWithModelAuthors: data.shareConversationsWithModelAuthors,
+		welcomeModalSeen: data.welcomeModalSeen,
+		welcomeModalSeenAt: data.welcomeModalSeenAt ? new Date(data.welcomeModalSeenAt) : null,
+		activeModel: data.activeModel,
+		customPrompts: data.customPrompts,
+		multimodalOverrides: data.multimodalOverrides,
+		disableStream: data.disableStream,
+		directPaste: data.directPaste,
+		hidePromptExamples: data.hidePromptExamples,
+	});
+
+	async function persistCurrent(): Promise<Omit<SettingsStore, "recentlySaved"> | null> {
+		const snapshot = { ...get(baseStore) };
+		const { recentlySaved: _recentlySaved, welcomeModalSeenAt: _ignored, ...payload } = snapshot;
+
+		try {
+			const response = await client.user.settings.post(payload);
+			const normalized = normalizeResponse(
+				handleResponse<{ 200: SettingsAPIResponse }>(
+					response as Treaty.TreatyResponse<{ 200: SettingsAPIResponse }>
+				)
+			);
+			invalidate(UrlDependency.ConversationList);
+			return normalized;
+		} catch (error) {
+			const message = parseTreatyError(error, "Failed to save settings");
+			console.error(message, error);
+			return null;
+		}
+	}
 
 	async function setSettings(settings: Partial<SettingsStore>) {
 		baseStore.update((s) => ({
@@ -40,29 +87,16 @@ export function createSettingsStore(initialValue: Omit<SettingsStore, "recentlyS
 		if (browser) {
 			clearTimeout(timeoutId);
 			timeoutId = setTimeout(async () => {
-				await fetch(`${base}/settings`, {
-					method: "POST",
-					headers: {
-						"Content-Type": "application/json",
-					},
-					body: JSON.stringify({
-						...get(baseStore),
-						...settings,
-					}),
-				});
-
-				invalidate(UrlDependency.ConversationList);
-				// set savedRecently to true for 3s
-				baseStore.update((s) => ({
-					...s,
-					recentlySaved: true,
-				}));
-				setTimeout(() => {
-					baseStore.update((s) => ({
-						...s,
-						recentlySaved: false,
-					}));
-				}, 3000);
+				const persisted = await persistCurrent();
+				if (persisted) {
+					baseStore.set({ ...persisted, recentlySaved: true });
+					setTimeout(() => {
+						baseStore.update((s) => ({
+							...s,
+							recentlySaved: false,
+						}));
+					}, 3000);
+				}
 			}, 300);
 			// debounce server calls by 300ms
 		}
@@ -74,17 +108,11 @@ export function createSettingsStore(initialValue: Omit<SettingsStore, "recentlyS
 		}));
 
 		if (browser) {
-			await fetch(`${base}/settings`, {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify({
-					...get(baseStore),
-					...settings,
-				}),
-			});
-			invalidate(UrlDependency.ConversationList);
+			const persisted = await persistCurrent();
+			if (persisted) {
+				const current = get(baseStore);
+				baseStore.set({ ...persisted, recentlySaved: current.recentlySaved });
+			}
 		}
 	}
 

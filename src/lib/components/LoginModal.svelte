@@ -35,7 +35,7 @@
 		<div class="flex w-full flex-col items-center gap-2">
 			{#if page.data.loginRequired}
 				<a
-					href="{base}/login"
+					href="{base}/api/v2/login"
 					class="flex w-full flex-wrap items-center justify-center whitespace-nowrap rounded-full bg-black px-5 py-2 text-center text-lg font-semibold text-gray-100 transition-colors hover:bg-gray-900"
 				>
 					Sign in

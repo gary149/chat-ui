@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { invalidateAll } from "$app/navigation";
 	import { page } from "$app/state";
-	import { base } from "$app/paths";
 	import type { Model } from "$lib/types/Model";
+	import { handleResponse, useAPIClient } from "$lib/APIClient";
+	import { parseTreatyError } from "$lib/utils/apiError";
 
 	interface Props {
 		models: Model[];
@@ -15,25 +16,28 @@
 		models.map((m) => m.id).includes(currentModel.id) ? currentModel.id : models[0].id
 	);
 
+	const client = useAPIClient();
+
+	function getErrorMessage(error: unknown) {
+		return parseTreatyError(error, "Failed to update model");
+	}
+
 	async function handleModelChange() {
 		if (!page.params.id) return;
 
 		try {
-			const response = await fetch(`${base}/conversation/${page.params.id}`, {
-				method: "PATCH",
-				headers: {
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify({ model: selectedModelId }),
-			});
-
-			if (!response.ok) {
-				throw new Error("Failed to update model");
-			}
+			await client
+				.conversations({ id: page.params.id })
+				.patch({ model: selectedModelId })
+				.then(handleResponse);
 
 			await invalidateAll();
 		} catch (error) {
+			const message = getErrorMessage(error);
 			console.error(error);
+			if (typeof window !== "undefined") {
+				window.alert?.(message);
+			}
 		}
 	}
 </script>

@@ -6,9 +6,12 @@ import {
 } from "$lib/types/MessageUpdate";
 
 import { page } from "$app/state";
+import { useAPIClient } from "$lib/APIClient";
+import { parseTreatyError } from "$lib/utils/apiError";
+
+const client = useAPIClient();
 
 type MessageUpdateRequestOptions = {
-	base: string;
 	inputs?: string;
 	messageId?: string;
 	isRetry: boolean;
@@ -23,8 +26,6 @@ export async function fetchMessageUpdates(
 	const abortController = new AbortController();
 	abortSignal.addEventListener("abort", () => abortController.abort());
 
-	const form = new FormData();
-
 	const optsJSON = JSON.stringify({
 		inputs: opts.inputs,
 		id: opts.messageId,
@@ -32,27 +33,34 @@ export async function fetchMessageUpdates(
 		is_continue: opts.isContinue,
 	});
 
-	opts.files?.forEach((file) => {
-		const name = file.type + ";" + file.name;
-
-		form.append("files", new File([file.value], name, { type: file.mime }));
+	const payloadFiles = opts.files?.map((file) => {
+		const name = `${file.type};${file.name}`;
+		return new File([file.value], name, { type: file.mime });
 	});
 
-	form.append("data", optsJSON);
-
-	const response = await fetch(`${opts.base}/conversation/${conversationId}`, {
-		method: "POST",
-		body: form,
-		signal: abortController.signal,
-	});
-
-	if (!response.ok) {
-		const errorMessage = await response
-			.json()
-			.then((obj) => obj.message)
-			.catch(() => `Request failed with status code ${response.status}: ${response.statusText}`);
-		throw Error(errorMessage);
+	const body: Record<string, unknown> = { data: optsJSON };
+	if (payloadFiles && payloadFiles.length > 0) {
+		body.files = payloadFiles;
 	}
+
+	let treatyResponse;
+	try {
+		treatyResponse = await client
+			.conversations({ id: conversationId })
+			.post(body, { fetch: { signal: abortController.signal } });
+	} catch (error) {
+		throw new Error(parseTreatyError(error, "Failed to contact conversation endpoint"));
+	}
+
+	if (treatyResponse.error) {
+		const message = parseTreatyError(
+			treatyResponse.error,
+			`Request failed with status code ${treatyResponse.status}`
+		);
+		throw new Error(message);
+	}
+
+	const response = treatyResponse.response;
 	if (!response.body) {
 		throw Error("Body not defined");
 	}

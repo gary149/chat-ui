@@ -149,8 +149,9 @@
 	{#if user?.username || user?.email}
 		<button
 			onclick={async () => {
-				await fetch(`${base}/logout`, {
+				await fetch(`${base}/api/v2/logout`, {
 					method: "POST",
+					credentials: "include",
 				});
 				await goto(base + "/", { invalidateAll: true });
 			}}
@@ -171,7 +172,7 @@
 	{/if}
 	<!-- {#if canLogin}
 		<a
-			href="{base}/login"
+			href="{base}/api/v2/login"
 			class="flex h-9 w-full flex-none items-center gap-1.5 rounded-lg pl-2.5 pr-2 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700"
 		>
 			Login

@@ -26,6 +26,9 @@
 	import type { TreeNode, TreeId } from "$lib/utils/tree/tree";
 	import "katex/dist/katex.min.css";
 	import { updateDebouncer } from "$lib/utils/updates.js";
+	import { handleResponse, useAPIClient } from "$lib/APIClient";
+	import type { Treaty } from "@elysiajs/eden";
+	import { parseTreatyError } from "$lib/utils/apiError";
 
 	let { data = $bindable() } = $props();
 
@@ -34,6 +37,12 @@
 	let initialRun = true;
 
 	let files: File[] = $state([]);
+
+	const client = useAPIClient();
+
+	function getErrorMessage(error: unknown) {
+		return parseTreatyError(error, ERROR_MESSAGES.default);
+	}
 
 	let conversations = $state(data.conversations);
 	$effect(() => {
@@ -96,28 +105,18 @@
 	async function convFromShared() {
 		try {
 			loading = true;
-			const res = await fetch(`${base}/conversation`, {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify({
-					fromShare: page.params.id,
-					model: data.model,
-				}),
+			const response = await client.conversations.post({
+				fromShare: page.params.id,
+				model: data.model,
 			});
 
-			if (!res.ok) {
-				error.set(await res.text());
-				console.error("Error while creating conversation: " + (await res.text()));
-				return;
-			}
-
-			const { conversationId } = await res.json();
+			const { conversationId } = handleResponse<{ 200: { conversationId: string } }>(
+				response as Treaty.TreatyResponse<{ 200: { conversationId: string } }>
+			);
 
 			return conversationId;
 		} catch (err) {
-			error.set(ERROR_MESSAGES.default);
+			error.set(getErrorMessage(err));
 			console.error(String(err));
 			throw err;
 		}
@@ -249,7 +248,6 @@
 			const messageUpdatesIterator = await fetchMessageUpdates(
 				page.params.id,
 				{
-					base,
 					inputs: prompt,
 					messageId,
 					isRetry,
@@ -482,19 +480,22 @@
 	oncontinue={onContinue}
 	onshowAlternateMsg={onShowAlternateMsg}
 	onstop={async () => {
-		await fetch(`${base}/conversation/${page.params.id}/stop-generating`, {
-			method: "POST",
-		}).then((r) => {
-			if (r.ok) {
-				setTimeout(() => {
-					$isAborted = true;
-					loading = false;
-				}, 3000);
-			} else {
+		try {
+			const response = await client.conversations({ id: page.params.id })["stop-generating"].post();
+
+			if (response.error) {
+				throw response.error;
+			}
+
+			setTimeout(() => {
 				$isAborted = true;
 				loading = false;
-			}
-		});
+			}, 3000);
+		} catch (err) {
+			console.error(err);
+			$isAborted = true;
+			loading = false;
+		}
 	}}
 	models={data.models}
 	currentModel={findCurrentModel([...data.models, ...data.oldModels], data.model)}

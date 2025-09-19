@@ -223,18 +223,18 @@
 			</div>
 		{/if}
 		<!-- add a button on top that removes the image -->
-	{#if canClose}
-		<button
-			class="absolute -right-2 -top-2 z-10 grid size-6 place-items-center rounded-full border bg-black group-hover:visible dark:border-gray-700"
-			class:invisible={navigator.maxTouchPoints === 0}
-			onclick={(e) => {
-				e.preventDefault();
-				e.stopPropagation();
-				onclose?.();
-			}}
-		>
-			<CarbonClose class=" text-xs  text-white" />
-		</button>
-	{/if}
+		{#if canClose}
+			<button
+				class="absolute -right-2 -top-2 z-10 grid size-6 place-items-center rounded-full border bg-black group-hover:visible dark:border-gray-700"
+				class:invisible={navigator.maxTouchPoints === 0}
+				onclick={(e) => {
+					e.preventDefault();
+					e.stopPropagation();
+					onclose?.();
+				}}
+			>
+				<CarbonClose class=" text-xs  text-white" />
+			</button>
+		{/if}
 	</div>
 </div>
