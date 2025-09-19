@@ -21,6 +21,7 @@
 	import OpenReasoningResults from "./OpenReasoningResults.svelte";
 	import Alternatives from "./Alternatives.svelte";
 	import MessageAvatar from "./MessageAvatar.svelte";
+	import { visibleStreamContent } from "$lib/stores/streamingRenderer";
 
 	interface Props {
 		message: Message;
@@ -84,7 +85,11 @@
 
 	// Zero-config reasoning autodetection: detect <think> blocks in content
 	const THINK_BLOCK_REGEX = /(<think>[\s\S]*?(?:<\/think>|$))/g;
-	let thinkSegments = $derived.by(() => message.content.split(THINK_BLOCK_REGEX));
+	let renderedContent = $derived.by(() => {
+		const override = $visibleStreamContent?.[message.id];
+		return override ?? message.content;
+	});
+	let thinkSegments = $derived.by(() => renderedContent.split(THINK_BLOCK_REGEX));
 	let hasServerReasoning = $derived(
 		reasoningUpdates &&
 			reasoningUpdates.length > 0 &&
@@ -142,17 +147,17 @@
 					.filter((u) => u.subtype === MessageReasoningUpdateType.Status)
 					.map((u) => u.status)}
 
-				<OpenReasoningResults
-					summary={summaries[summaries.length - 1] || ""}
-					content={message.reasoning || ""}
-					loading={loading && message.content.length === 0}
-				/>
+					<OpenReasoningResults
+						summary={summaries[summaries.length - 1] || ""}
+						content={message.reasoning || ""}
+						loading={loading && renderedContent.length === 0}
+					/>
 			{/if}
 
 			<div bind:this={contentEl}>
-				{#if isLast && loading && message.content.length === 0}
-					<IconLoading classNames="loading inline ml-2 first:ml-0" />
-				{/if}
+					{#if isLast && loading && renderedContent.length === 0}
+						<IconLoading classNames="loading inline ml-2 first:ml-0" />
+					{/if}
 
 				{#if hasClientThink}
 					{#each thinkSegments as part}
@@ -180,7 +185,7 @@
 					<div
 						class="prose max-w-none dark:prose-invert max-sm:prose-sm prose-headings:font-semibold prose-h1:text-lg prose-h2:text-base prose-h3:text-base prose-pre:bg-gray-800 dark:prose-pre:bg-gray-900"
 					>
-						<MarkdownRenderer content={message.content} loading={isLast && loading} />
+						<MarkdownRenderer content={renderedContent} loading={isLast && loading} />
 					</div>
 				{/if}
 			</div>

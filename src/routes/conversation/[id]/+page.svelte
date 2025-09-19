@@ -22,6 +22,11 @@
 	import type { v4 } from "uuid";
 	import { useSettingsStore } from "$lib/stores/settings.js";
 	import { browser } from "$app/environment";
+	import {
+		completeStreamView,
+		primeStreamView,
+		queueStreamView,
+	} from "$lib/stores/streamingRenderer";
 
 	import type { TreeNode, TreeId } from "$lib/utils/tree/tree";
 	import "katex/dist/katex.min.css";
@@ -134,6 +139,9 @@
 		isRetry?: boolean;
 		isContinue?: boolean;
 	}): Promise<void> {
+		let messageToWriteToId: Message["id"] | undefined;
+		let messageToWriteTo: Message | undefined;
+		let buffer = "";
 		try {
 			$isAborted = false;
 			loading = true;
@@ -149,7 +157,7 @@
 				)
 			);
 
-			let messageToWriteToId: Message["id"] | undefined = undefined;
+			messageToWriteToId = undefined;
 			// used for building the prompt, subtree of the conversation that goes from the latest message to the root
 
 			if (isContinue && messageId) {
@@ -239,7 +247,7 @@
 			}
 
 			const userMessage = messages.find((message) => message.id === messageId);
-			const messageToWriteTo = messages.find((message) => message.id === messageToWriteToId);
+			messageToWriteTo = messages.find((message) => message.id === messageToWriteToId);
 			if (!messageToWriteTo) {
 				throw new Error("Message to write to not found");
 			}
@@ -262,8 +270,11 @@
 			});
 			if (messageUpdatesIterator === undefined) return;
 
+			if (!$settings.disableStream && messageToWriteToId && messageToWriteTo) {
+				primeStreamView(messageToWriteToId, messageToWriteTo.content);
+			}
+
 			files = [];
-			let buffer = "";
 			// Initialize lastUpdateTime outside the loop to persist between updates
 			let lastUpdateTime = new Date();
 
@@ -294,7 +305,13 @@
 				}
 				const currentTime = new Date();
 
-				if (update.type === MessageUpdateType.Stream && !$settings.disableStream) {
+				if (
+					update.type === MessageUpdateType.Stream &&
+					!$settings.disableStream &&
+					messageToWriteTo &&
+					messageToWriteToId
+				) {
+					queueStreamView(messageToWriteToId, update.token);
 					buffer += update.token;
 					// Check if this is the first update or if enough time has passed
 					if (currentTime.getTime() - lastUpdateTime.getTime() > updateDebouncer.maxUpdateTime) {
@@ -358,6 +375,17 @@
 			}
 			console.error(err);
 		} finally {
+			if (messageToWriteTo && buffer.length > 0) {
+				messageToWriteTo.content += buffer;
+				buffer = "";
+			}
+			if (
+				!$settings.disableStream &&
+				messageToWriteTo &&
+				messageToWriteToId
+			) {
+				completeStreamView(messageToWriteToId, messageToWriteTo.content);
+			}
 			loading = false;
 			pending = false;
 			await invalidateAll();

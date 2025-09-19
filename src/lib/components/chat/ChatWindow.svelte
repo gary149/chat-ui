@@ -35,6 +35,7 @@
 	import { loginModalOpen } from "$lib/stores/loginModal";
 
 	import { isVirtualKeyboard } from "$lib/utils/isVirtualKeyboard";
+	import { visibleStreamContent } from "$lib/stores/streamingRenderer";
 
 	interface Props {
 		messages?: Message[];
@@ -140,7 +141,12 @@
 	let lastMessage = $derived(browser && (messages.at(-1) as Message));
 	let scrollSignal = $derived.by(() => {
 		const last = messages.at(-1) as Message | undefined;
-		return last ? `${last.id}:${last.content.length}:${messages.length}` : `${messages.length}:0`;
+		const overrides = $visibleStreamContent;
+		if (!last) {
+			return `${messages.length}:0`;
+		}
+		const visibleLength = (overrides?.[last.id] ?? last.content).length;
+		return `${last.id}:${visibleLength}:${messages.length}`;
 	});
 	let lastIsError = $derived(
 		lastMessage &&
