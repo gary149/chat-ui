@@ -4,6 +4,7 @@
 	import { afterNavigate, goto } from "$app/navigation";
 	import { page } from "$app/state";
 	import { useSettingsStore } from "$lib/stores/settings";
+	import IconOmni from "$lib/components/icons/IconOmni.svelte";
 	import CarbonClose from "~icons/carbon/close";
 	import CarbonTextLongParagraph from "~icons/carbon/text-long-paragraph";
 	import CarbonChevronLeft from "~icons/carbon/chevron-left";
@@ -127,7 +128,7 @@
 	</div>
 	{#if !(showContent && browser && !isDesktop(window))}
 		<div
-			class="scrollbar-custom col-span-1 flex flex-col overflow-y-auto whitespace-nowrap max-md:-mx-4 max-md:h-full md:pr-6"
+			class="scrollbar-custom col-span-1 flex flex-col overflow-y-auto whitespace-nowrap rounded-r-xl bg-gradient-to-l from-gray-50 to-10% dark:from-gray-700/40 max-md:-mx-4 max-md:h-full md:pr-6"
 			class:max-md:hidden={showContent && browser}
 			bind:this={navContainer}
 		>
@@ -165,9 +166,14 @@
 					data-model-id={model.id}
 					aria-label="Configure {model.displayName}"
 				>
-					<div class="mr-auto truncate">{model.displayName}</div>
+					<div class="mr-auto flex items-center gap-1 truncate">
+						<span class="truncate">{model.displayName}</span>
+						{#if model.isRouter}
+							<IconOmni />
+						{/if}
+					</div>
 
-					{#if model.multimodal || $settings.multimodalOverrides?.[model.id]}
+					{#if $settings.multimodalOverrides?.[model.id] ?? model.multimodal}
 						<span
 							title="Supports image inputs (multimodal)"
 							class="grid size-[21px] place-items-center rounded-md border border-blue-700 dark:border-blue-500"
@@ -185,7 +191,7 @@
 					{/if}
 					{#if model.id === $settings.activeModel}
 						<div
-							class="flex h-[21px] items-center rounded-md bg-black/90 px-2 text-[10px] font-semibold leading-none text-white dark:bg-white/10 dark:text-white"
+							class="flex h-[21px] items-center rounded-md bg-black/90 px-2 text-[11px] font-semibold leading-none text-white dark:bg-white dark:text-black"
 						>
 							Active
 						</div>
@@ -193,14 +199,13 @@
 				</button>
 			{/each}
 
-			<div class="my-2 mt-auto w-full border-b border-gray-200 dark:border-gray-700"></div>
 			<button
 				type="button"
 				onclick={() => goto(`${base}/settings/application`)}
-				class="group flex h-9 w-full flex-none items-center gap-1 rounded-lg px-3 text-[13px] text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800/60 max-md:order-first md:rounded-xl md:px-3 {page
+				class="group sticky bottom-0 mt-1 flex h-9 w-full flex-none items-center gap-1 rounded-lg px-3 text-[13px] text-gray-600 dark:text-gray-300 max-md:order-first md:rounded-xl md:px-3 {page
 					.url.pathname === `${base}/settings/application`
 					? '!bg-gray-100 !text-gray-800 dark:!bg-gray-700 dark:!text-gray-200'
-					: ''}"
+					: 'bg-white dark:bg-gray-800'}"
 				aria-label="Configure application settings"
 			>
 				<IconGear class="mr-0.5 text-xxs" />

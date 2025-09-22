@@ -169,18 +169,32 @@ PUBLIC_APP_ASSETS=chatui
 PUBLIC_APP_COLOR=blue
 PUBLIC_APP_DESCRIPTION="Making the community's best AI chat models available to everyone."
 PUBLIC_APP_DATA_SHARING=
-PUBLIC_APP_DISCLAIMER=
 ```
 
 - `PUBLIC_APP_NAME` The name used as a title throughout the app.
 - `PUBLIC_APP_ASSETS` Is used to find logos & favicons in `static/$PUBLIC_APP_ASSETS`, current options are `chatui` and `huggingchat`.
 - `PUBLIC_APP_COLOR` Can be any of the [tailwind colors](https://tailwindcss.com/docs/customizing-colors#default-color-palette).
 - `PUBLIC_APP_DATA_SHARING` Can be set to 1 to add a toggle in the user settings that lets your users opt-in to data sharing with models creator.
-- `PUBLIC_APP_DISCLAIMER` If set to 1, we show a disclaimer about generated outputs on login.
 
 ### Models
 
 This build does not use the `MODELS` env var or GGUF discovery. Configure models via `OPENAI_BASE_URL` only; Chat UI will fetch `${OPENAI_BASE_URL}/models` and populate the list automatically. Authorization uses `OPENAI_API_KEY` (preferred). `HF_TOKEN` remains a legacy alias.
+
+### LLM Router (Optional)
+
+Chat UI can perform client-side routing using an Arch Router model without running a separate router service. The UI exposes a virtual model alias called "Omni" (configurable) that, when selected, chooses the best route/model for each message.
+
+- Provide a routes policy JSON via `LLM_ROUTER_ROUTES_PATH`. No sample file ships with this branch, so you must point the variable to a JSON array you create yourself (for example, commit one in your project like `config/routes.chat.json`). Each route entry needs `name`, `description`, `primary_model`, and optional `fallback_models`.
+- Configure the Arch router selection endpoint with `LLM_ROUTER_ARCH_BASE_URL` (OpenAI-compatible `/chat/completions`) and `LLM_ROUTER_ARCH_MODEL` (e.g. `router/omni`). The Arch call reuses `OPENAI_API_KEY` for auth.
+- Map `other` to a concrete route via `LLM_ROUTER_OTHER_ROUTE` (default: `casual_conversation`). If Arch selection fails, calls fall back to `LLM_ROUTER_FALLBACK_MODEL`.
+- Selection timeout can be tuned via `LLM_ROUTER_ARCH_TIMEOUT_MS` (default 10000).
+- Omni alias configuration: `PUBLIC_LLM_ROUTER_ALIAS_ID` (default `omni`), `PUBLIC_LLM_ROUTER_DISPLAY_NAME` (default `Omni`), and optional `PUBLIC_LLM_ROUTER_LOGO_URL`.
+
+When you select Omni in the UI, Chat UI will:
+
+- Call the Arch endpoint once (non-streaming) to pick the best route for the last turns.
+- Emit RouterMetadata immediately (route and actual model used) so the UI can display it.
+- Stream from the selected model via your configured `OPENAI_BASE_URL`. On errors, it tries route fallbacks.
 
 ## Common issues
 

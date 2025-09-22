@@ -3,6 +3,7 @@
 	import { base } from "$app/paths";
 
 	import type { BackendModel } from "$lib/server/models";
+	import IconOmni from "$lib/components/icons/IconOmni.svelte";
 	import { useSettingsStore } from "$lib/stores/settings";
 	import CopyToClipBoardBtn from "$lib/components/CopyToClipBoardBtn.svelte";
 	import CarbonArrowUpRight from "~icons/carbon/arrow-up-right";
@@ -51,23 +52,37 @@
 			};
 		}
 	});
+
+	// Ensure hidePromptExamples has an entry for this model so the switch can bind safely
+	$effect(() => {
+		if (!$settings.hidePromptExamples) {
+			$settings.hidePromptExamples = {};
+		}
+		const modelId = page.params.model;
+		if ($settings.hidePromptExamples[modelId] === undefined) {
+			$settings.hidePromptExamples = {
+				...$settings.hidePromptExamples,
+				[modelId]: false,
+			};
+		}
+	});
 </script>
 
 <div class="flex flex-col items-start">
 	<div class="mb-4 flex flex-col gap-0.5">
 		<h2 class="text-base font-semibold md:text-lg">
-			{page.params.model}
+			{model.displayName}
 		</h2>
 
 		{#if model.description}
-			<p class="whitespace-pre-wrap text-gray-600 dark:text-gray-400">
+			<p class="whitespace-pre-wrap text-sm text-gray-600 dark:text-gray-400">
 				{model.description}
 			</p>
 		{/if}
 	</div>
 
 	<!-- Actions -->
-	<div class="mb-4 flex flex-wrap items-center gap-x-1.5 gap-y-1">
+	<div class="mb-4 flex flex-wrap items-center gap-1.5">
 		<button
 			class="flex w-fit items-center rounded-full bg-black px-3 py-1.5 text-sm !text-white shadow-sm hover:bg-black/90 dark:bg-white/80 dark:!text-gray-900 dark:hover:bg-white/90"
 			name="Activate model"
@@ -120,36 +135,44 @@
 		{/if}
 
 		{#if publicConfig.isHuggingChat}
-			<a
-				href={"https://huggingface.co/playground?modelId=" + model.name}
-				target="_blank"
-				rel="noreferrer"
-				class="inline-flex items-center rounded-full border border-gray-200 px-2.5 py-1 text-sm hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700/60"
-			>
-				<CarbonCode class="mr-1.5 shrink-0 text-xs" />
-				API Playground
-			</a>
-			<a
-				href={"https://huggingface.co/" + model.name}
-				target="_blank"
-				rel="noreferrer"
-				class="inline-flex items-center rounded-full border border-gray-200 px-2.5 py-1 text-sm hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700/60"
-			>
-				<CarbonArrowUpRight class="mr-1.5 shrink-0 text-xs" />
-				View model card
-			</a>
+			{#if !model?.isRouter}
+				<a
+					href={"https://huggingface.co/playground?modelId=" + model.name}
+					target="_blank"
+					rel="noreferrer"
+					class="inline-flex items-center rounded-full border border-gray-200 px-2.5 py-1 text-sm hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700/60"
+				>
+					<CarbonCode class="mr-1.5 shrink-0 text-xs" />
+					API Playground
+				</a>
+				<a
+					href={"https://huggingface.co/" + model.name}
+					target="_blank"
+					rel="noreferrer"
+					class="inline-flex items-center rounded-full border border-gray-200 px-2.5 py-1 text-sm hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700/60"
+				>
+					<CarbonArrowUpRight class="mr-1.5 shrink-0 text-xs" />
+					View model card
+				</a>
+			{/if}
 			<CopyToClipBoardBtn
 				value="{publicConfig.PUBLIC_ORIGIN || page.url.origin}{base}/models/{model.id}"
 				classNames="inline-flex items-center rounded-full border border-gray-200 px-2.5 py-1 text-sm hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700/60"
 			>
 				<div class="flex items-center gap-1.5">
-					<CarbonCopy class="shrink-0 text-xs" />Copy direct link to model
+					<CarbonCopy class="shrink-0 text-xs" />Copy new chat link
 				</div>
 			</CopyToClipBoardBtn>
 		{/if}
 	</div>
 
 	<div class="relative flex w-full flex-col gap-2">
+		{#if model?.isRouter}
+			<p class="mb-3 mt-2 rounded-lg bg-gray-100 px-3 py-2 text-sm dark:bg-white/5">
+				<IconOmni classNames="-translate-y-px" /> Omni routes your messages to the best underlying model
+				depending on your request.
+			</p>
+		{/if}
 		<div class="flex w-full flex-row content-between">
 			<h3 class="mb-1 text-[15px] font-semibold text-gray-800 dark:text-gray-200">System Prompt</h3>
 			{#if hasCustomPreprompt}
@@ -164,6 +187,7 @@
 				</button>
 			{/if}
 		</div>
+
 		<textarea
 			aria-label="Custom system prompt"
 			rows="8"
@@ -189,6 +213,23 @@
 						bind:checked={$settings.multimodalOverrides[page.params.model]}
 					/>
 				</div>
+
+				{#if model?.isRouter}
+					<div class="flex items-start justify-between py-3">
+						<div>
+							<div class="text-[13px] font-medium text-gray-800 dark:text-gray-200">
+								Hide prompt examples
+							</div>
+							<p class="text-[12px] text-gray-500 dark:text-gray-400">
+								Hide the prompt suggestions above the chat input.
+							</p>
+						</div>
+						<Switch
+							name="hidePromptExamples"
+							bind:checked={$settings.hidePromptExamples[page.params.model]}
+						/>
+					</div>
+				{/if}
 			</div>
 		</div>
 

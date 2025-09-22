@@ -18,11 +18,11 @@
 
 <details
 	bind:open={isOpen}
-	class="group flex w-fit max-w-full flex-col rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900 [&:has(+_.prose)]:mb-3"
+	class="group flex w-fit max-w-full flex-col rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900 [&:has(+_.prose)]:mb-4"
 >
 	<summary
 		class="
-		grid min-w-72 cursor-pointer select-none grid-cols-[40px,1fr,24px] items-center gap-2.5 rounded-xl p-2 group-open:rounded-b-none hover:bg-gray-50 dark:hover:bg-gray-800"
+		grid min-w-72 cursor-pointer select-none grid-cols-[40px,1fr,24px] items-center gap-2.5 rounded-xl p-2 group-open:rounded-b-none hover:bg-gray-50 dark:hover:bg-gray-800/20"
 	>
 		<div
 			class="relative grid aspect-square place-content-center overflow-hidden rounded-lg bg-gray-100 dark:bg-gray-800"
@@ -65,14 +65,16 @@
 						: summary + "..."}
 			</dt>
 		</dl>
-		<CarbonCaretDown class="size-6 text-gray-400 transition-transform group-open:rotate-180" />
+		<CarbonCaretDown
+			class="transition-rotate size-5 -rotate-90 text-gray-400 group-open:rotate-0"
+		/>
 	</summary>
 
 	<div
-		class="space-y-4 border-t border-gray-200 p-3 text-sm text-gray-600 dark:border-gray-800 dark:text-gray-400"
+		class="prose prose-sm !max-w-none space-y-4 border-t border-gray-200 p-3 text-sm text-gray-600 dark:prose-invert dark:border-gray-800 dark:text-gray-400"
 	>
 		{#key content}
-			<MarkdownRenderer {content} />
+			<MarkdownRenderer {content} loading={loading} />
 		{/key}
 	</div>
 </details>

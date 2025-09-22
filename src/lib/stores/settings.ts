@@ -7,14 +7,15 @@ import { type Writable, writable, get } from "svelte/store";
 
 type SettingsStore = {
 	shareConversationsWithModelAuthors: boolean;
-	ethicsModalAccepted: boolean;
-	ethicsModalAcceptedAt: Date | null;
+	welcomeModalSeen: boolean;
+	welcomeModalSeenAt: Date | null;
 	activeModel: string;
 	customPrompts: Record<string, string>;
 	multimodalOverrides: Record<string, boolean>;
 	recentlySaved: boolean;
 	disableStream: boolean;
 	directPaste: boolean;
+	hidePromptExamples: Record<string, boolean>;
 };
 
 type SettingsStoreWritable = Writable<SettingsStore> & {

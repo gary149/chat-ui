@@ -1,15 +1,15 @@
 <script lang="ts">
 	import Modal from "$lib/components/Modal.svelte";
-	import { createEventDispatcher, onMount } from "svelte";
+	import { onMount } from "svelte";
 
 	interface Props {
 		open?: boolean;
 		title?: string;
+		onclose?: () => void;
+		onsave?: (payload: { title: string }) => void;
 	}
 
-	let { open = false, title = "" }: Props = $props();
-
-	const dispatch = createEventDispatcher<{ close: void; save: { title: string } }>();
+	let { open = false, title = "", onclose, onsave }: Props = $props();
 
 	let newTitle = $state(title);
 	let inputEl: HTMLInputElement | undefined = $state();
@@ -23,13 +23,13 @@
 
 	function close() {
 		open = false;
-		dispatch("close");
+		onclose?.();
 	}
 
 	function save() {
 		const trimmed = (newTitle ?? "").trim();
 		if (!trimmed) return;
-		dispatch("save", { title: trimmed });
+		onsave?.({ title: trimmed });
 		close();
 	}
 
@@ -43,7 +43,7 @@
 </script>
 
 {#if open}
-	<Modal on:close={close} width="w-[90dvh] md:w-[480px]">
+	<Modal onclose={close} width="w-[90dvh] md:w-[480px]">
 		<form
 			class="flex w-full flex-col gap-5 p-6"
 			onsubmit={(e) => {
@@ -69,6 +69,7 @@
 			<div class="flex flex-col gap-2">
 				<label for="conv-title" class="text-sm text-gray-600 dark:text-gray-400">Title</label>
 				<input
+					autocomplete="off"
 					id="conv-title"
 					bind:this={inputEl}
 					value={newTitle}

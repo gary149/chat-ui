@@ -1,8 +1,9 @@
 <script lang="ts">
 	import type { Message } from "$lib/types/Message";
-	import { createEventDispatcher, tick } from "svelte";
-	import { page } from "$app/state";
+	import { tick } from "svelte";
 
+	import { usePublicConfig } from "$lib/utils/PublicConfig.svelte";
+	const publicConfig = usePublicConfig();
 	import CopyToClipBoardBtn from "../CopyToClipBoardBtn.svelte";
 	import IconLoading from "../icons/IconLoading.svelte";
 	import CarbonRotate360 from "~icons/carbon/rotate-360";
@@ -13,7 +14,6 @@
 
 	import {
 		MessageUpdateType,
-		type MessageFinalAnswerUpdate,
 		type MessageReasoningUpdate,
 		MessageReasoningUpdateType,
 	} from "$lib/types/MessageUpdate";
@@ -33,25 +33,31 @@
 		alternatives?: Message["id"][];
 		editMsdgId?: Message["id"] | null;
 		isLast?: boolean;
+		onretry?: (payload: { id: Message["id"]; content?: string }) => void;
+		onshowAlternateMsg?: (payload: { id: Message["id"] }) => void;
 	}
 
 	let {
 		message,
 		loading = false,
-		isAuthor = true,
-		readOnly = false,
+		isAuthor: _isAuthor = true,
+		readOnly: _readOnly = false,
 		isTapped = $bindable(false),
 		alternatives = [],
 		editMsdgId = $bindable(null),
 		isLast = false,
+		onretry,
+		onshowAlternateMsg,
 	}: Props = $props();
-
-	const dispatch = createEventDispatcher<{
-		retry: { content?: string; id: Message["id"] };
-	}>();
 
 	let contentEl: HTMLElement | undefined = $state();
 	let isCopied = $state(false);
+
+	$effect(() => {
+		// referenced to appease linter for currently-unused props
+		void _isAuthor;
+		void _readOnly;
+	});
 
 	function handleKeyDown(e: KeyboardEvent) {
 		if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -100,13 +106,14 @@
 
 	// Zero-config reasoning autodetection: detect <think> blocks in content
 	const THINK_BLOCK_REGEX = /(<think>[\s\S]*?(?:<\/think>|$))/g;
+	let thinkSegments = $derived.by(() => message.content.split(THINK_BLOCK_REGEX));
 	let hasServerReasoning = $derived(
 		reasoningUpdates &&
 			reasoningUpdates.length > 0 &&
 			!!message.reasoning &&
 			message.reasoning.trim().length > 0
 	);
-	let hasClientThink = $derived(!hasServerReasoning && /<think>/.test(message.content));
+	let hasClientThink = $derived(!hasServerReasoning && thinkSegments.length > 1);
 
 	$effect(() => {
 		if (isCopied) {
@@ -141,12 +148,6 @@
 			classNames="mt-5 size-3.5 flex-none select-none rounded-full shadow-lg max-sm:hidden"
 			animating={isLast && loading}
 		/>
-		<!-- <img
-			alt=""
-			src="https://huggingface.co/avatars/2edb18bd0206c16b433841a47f53fa8e.svg"
-			class="mt-5 h-3 w-3 flex-none select-none rounded-full shadow-lg max-sm:hidden"
-		/> -->
-		<!-- min-h-[calc(2rem+theme(spacing[3.5])*2)] -->
 		<div
 			class="relative flex min-w-[60px] flex-col gap-2 break-words rounded-2xl border border-gray-100 bg-gradient-to-br from-gray-50 px-5 py-3.5 text-gray-600 prose-pre:my-2 dark:border-gray-800 dark:from-gray-800/80 dark:text-gray-300"
 		>
@@ -186,7 +187,7 @@
 				{/if}
 
 				{#if hasClientThink}
-					{#each message.content.split(THINK_BLOCK_REGEX) as part, i}
+					{#each thinkSegments as part}
 						{#if part && part.startsWith("<think>")}
 							{@const isClosed = part.endsWith("</think>")}
 							{@const thinkContent = part.slice(7, isClosed ? -8 : undefined)}
@@ -203,7 +204,7 @@
 							<div
 								class="prose max-w-none dark:prose-invert max-sm:prose-sm prose-headings:font-semibold prose-h1:text-lg prose-h2:text-base prose-h3:text-base prose-pre:bg-gray-800 dark:prose-pre:bg-gray-900"
 							>
-								<MarkdownRenderer content={part} />
+								<MarkdownRenderer content={part} loading={isLast && loading} />
 							</div>
 						{/if}
 					{/each}
@@ -211,34 +212,64 @@
 					<div
 						class="prose max-w-none dark:prose-invert max-sm:prose-sm prose-headings:font-semibold prose-h1:text-lg prose-h2:text-base prose-h3:text-base prose-pre:bg-gray-800 dark:prose-pre:bg-gray-900"
 					>
-						<MarkdownRenderer content={message.content} />
+						<MarkdownRenderer content={message.content} loading={isLast && loading} />
 					</div>
 				{/if}
 			</div>
 		</div>
 
-		{#if !loading && (message.content || hasToolUpdates)}
+		{#if message.routerMetadata || (!loading && message.content) || hasToolUpdates}
 			<div class="absolute -bottom-3.5 right-1 flex items-center gap-0.5">
-				<CopyToClipBoardBtn
-					onClick={() => {
-						isCopied = true;
-					}}
-					classNames="btn rounded-sm p-1 text-sm text-gray-400 hover:text-gray-500 focus:ring-0 dark:text-gray-400 dark:hover:text-gray-300"
-					value={message.content}
-					iconClassNames="text-xs"
-				/>
-				<button
-					class="btn rounded-sm p-1 text-xs text-gray-400 hover:text-gray-500 focus:ring-0 dark:text-gray-400 dark:hover:text-gray-300"
-					title="Retry"
-					type="button"
-					onclick={() => {
-						dispatch("retry", { id: message.id });
-					}}
-				>
-					<CarbonRotate360 />
-				</button>
-				{#if alternatives.length > 1 && editMsdgId === null}
-					<Alternatives {message} {alternatives} {loading} on:showAlternateMsg />
+				{#if message.routerMetadata && (!isLast || !loading)}
+					<div
+						class="mr-2 flex items-center gap-1.5 whitespace-nowrap text-xs text-gray-400 dark:text-gray-400"
+					>
+						<span class="rounded bg-gray-100 px-1.5 py-0.5 font-mono dark:bg-gray-800">
+							{message.routerMetadata.route}
+						</span>
+						<span class="text-gray-500">with</span>
+						{#if publicConfig.isHuggingChat}
+							<a
+								href="https://huggingface.co/{message.routerMetadata.model}"
+								target="_blank"
+								class="rounded bg-gray-100 px-1.5 py-0.5 font-mono hover:text-gray-500 dark:bg-gray-800 dark:hover:text-gray-300"
+							>
+								{message.routerMetadata.model.split("/").pop()}
+							</a>
+						{:else}
+							<span class="rounded bg-gray-100 px-1.5 py-0.5 font-mono dark:bg-gray-800">
+								{message.routerMetadata.model.split("/").pop()}
+							</span>
+						{/if}
+					</div>
+				{/if}
+				{#if !isLast || !loading}
+					<CopyToClipBoardBtn
+						onClick={() => {
+							isCopied = true;
+						}}
+						classNames="btn rounded-sm p-1 text-sm text-gray-400 hover:text-gray-500 focus:ring-0 dark:text-gray-400 dark:hover:text-gray-300"
+						value={message.content}
+						iconClassNames="text-xs"
+					/>
+					<button
+						class="btn rounded-sm p-1 text-xs text-gray-400 hover:text-gray-500 focus:ring-0 dark:text-gray-400 dark:hover:text-gray-300"
+						title="Retry"
+						type="button"
+						onclick={() => {
+							onretry?.({ id: message.id });
+						}}
+					>
+						<CarbonRotate360 />
+					</button>
+					{#if alternatives.length > 1 && editMsdgId === null}
+						<Alternatives
+							{message}
+							{alternatives}
+							{loading}
+							onshowAlternateMsg={(payload) => onshowAlternateMsg?.(payload)}
+						/>
+					{/if}
 				{/if}
 			</div>
 		{/if}
@@ -277,7 +308,7 @@
 						bind:this={editFormEl}
 						onsubmit={(e) => {
 							e.preventDefault();
-							dispatch("retry", { content: editContentEl?.value, id: message.id });
+							onretry?.({ content: editContentEl?.value, id: message.id });
 							editMsdgId = null;
 						}}
 					>
@@ -316,7 +347,12 @@
 			</div>
 			<div class="absolute -bottom-4 ml-3.5 flex w-full gap-1.5">
 				{#if alternatives.length > 1 && editMsdgId === null}
-					<Alternatives {message} {alternatives} {loading} on:showAlternateMsg />
+					<Alternatives
+						{message}
+						{alternatives}
+						{loading}
+						onshowAlternateMsg={(payload) => onshowAlternateMsg?.(payload)}
+					/>
 				{/if}
 				{#if (alternatives.length > 1 && editMsdgId === null) || (!loading && !editMode)}
 					<button

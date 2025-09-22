@@ -1,19 +1,43 @@
 <script lang="ts">
 	import { onDestroy } from "svelte";
 
-	export let animating = false;
-	export let classNames = "";
+	let { animating = false, classNames = "" } = $props();
 
-	let blobAnim: SVGAnimateElement;
+	let blobAnim: SVGAnimateElement | undefined = $state();
+	let svgEl: SVGSVGElement | undefined = $state();
 
-	$: if (blobAnim) {
-		animating ? blobAnim.beginElement() : blobAnim.endElement();
-	}
+	// Only trigger begin/end on transitions, and pause when not animating
+	let prevAnimating: boolean | undefined = undefined;
+	let prevBlobAnim: SVGAnimateElement | undefined = undefined;
 
-	onDestroy(() => blobAnim?.endElement());
+	$effect(() => {
+		if (!blobAnim) return;
+		const blobChanged = blobAnim !== prevBlobAnim;
+		const animChanged = animating !== prevAnimating;
+		if (!(blobChanged || animChanged)) return;
+
+		if (animating) {
+			// Resume animations and start once
+			svgEl?.unpauseAnimations?.();
+			blobAnim.beginElement();
+		} else {
+			// Stop current run and pause so it cannot restart from queued begins
+			blobAnim.endElement();
+			svgEl?.pauseAnimations?.();
+		}
+		prevAnimating = animating;
+		prevBlobAnim = blobAnim;
+	});
+
+	onDestroy(() => {
+		blobAnim?.endElement();
+		svgEl?.pauseAnimations?.();
+	});
 </script>
 
+
 <svg
+	bind:this={svgEl}
 	class={classNames}
 	id="ball"
 	width="1em"

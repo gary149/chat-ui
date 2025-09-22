@@ -88,7 +88,7 @@
 							></div>
 						{/if}
 						<div class="flex items-center gap-1">
-							{#if model.multimodal || $settings.multimodalOverrides?.[model.id]}
+							{#if $settings.multimodalOverrides?.[model.id] ?? model.multimodal}
 								<span
 									title="This model is multimodal and supports image inputs natively."
 									class="ml-auto flex size-[21px] items-center justify-center rounded-lg border border-blue-700 dark:border-blue-500"
@@ -125,7 +125,7 @@
 								>
 									Active
 								</span>
-							{:else if index === 0}
+							{:else if index === 0 && model.id === "omni"}
 								<span
 									class="rounded-full border border-gray-300 px-2 py-0.5 text-xs text-gray-500 dark:border-gray-500 dark:text-gray-400"
 								>

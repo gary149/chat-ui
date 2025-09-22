@@ -1,9 +1,8 @@
 <script lang="ts">
-	import { createEventDispatcher, onMount, tick } from "svelte";
+	import { onMount, tick } from "svelte";
 
 	import HoverTooltip from "$lib/components/HoverTooltip.svelte";
 	import IconPaperclip from "$lib/components/icons/IconPaperclip.svelte";
-	import { useSettingsStore } from "$lib/stores/settings";
 	import { page } from "$app/state";
 	import { loginModalOpen } from "$lib/stores/loginModal";
 
@@ -20,6 +19,7 @@
 		children?: import("svelte").Snippet;
 		onPaste?: (e: ClipboardEvent) => void;
 		focused?: boolean;
+		onsubmit?: () => void;
 	}
 
 	let {
@@ -34,6 +34,7 @@
 		children,
 		onPaste,
 		focused = $bindable(false),
+		onsubmit,
 	}: Props = $props();
 
 	const onFileChange = async (e: Event) => {
@@ -44,8 +45,6 @@
 
 	let textareaElement: HTMLTextAreaElement | undefined = $state();
 	let isCompositionOn = $state(false);
-
-	const dispatch = createEventDispatcher<{ submit: void }>();
 
 	onMount(() => {
 		if (!isVirtualKeyboard()) {
@@ -86,11 +85,9 @@
 			event.preventDefault();
 			adjustTextareaHeight();
 			tick();
-			dispatch("submit");
+			onsubmit?.();
 		}
 	}
-
-	const settings = useSettingsStore();
 
 	// Tools removed; only show file upload when applicable
 	let showFileUpload = $derived(modelIsMultimodal && mimeTypes.length > 0);

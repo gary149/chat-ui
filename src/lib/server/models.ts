@@ -5,9 +5,15 @@ import endpoints, { endpointSchema, type Endpoint } from "./endpoints/endpoints"
 
 import JSON5 from "json5";
 import { logger } from "$lib/server/logger";
-import { fetchJSON } from "$lib/utils/fetchJSON";
+import { makeRouterEndpoint } from "$lib/server/router/endpoint";
 
 type Optional<T, K extends keyof T> = Pick<Partial<T>, K> & Omit<T, K>;
+
+const sanitizeJSONEnv = (val: string, fallback: string) => {
+	const raw = (val ?? "").trim();
+	const unquoted = raw.startsWith("`") && raw.endsWith("`") ? raw.slice(1, -1) : raw;
+	return unquoted || fallback;
+};
 
 const reasoningSchema = z.union([
 	z.object({
@@ -72,10 +78,24 @@ const modelConfig = z.object({
 	reasoning: reasoningSchema.optional(),
 });
 
-const ggufModelsConfig: Array<z.infer<typeof modelConfig>> = [];
+type ModelConfig = z.infer<typeof modelConfig>;
+
+const overrideEntrySchema = modelConfig
+	.partial()
+	.extend({
+		id: z.string().optional(),
+		name: z.string().optional(),
+	})
+	.refine((value) => Boolean((value.id ?? value.name)?.trim()), {
+		message: "Model override entry must provide an id or name",
+	});
+
+type ModelOverride = z.infer<typeof overrideEntrySchema>;
+
+// ggufModelsConfig unused in this build
 
 // Source models exclusively from an OpenAI-compatible endpoint.
-let modelsRaw: z.infer<typeof modelConfig>[] = [];
+let modelsRaw: ModelConfig[] = [];
 
 // Require explicit base URL; no implicit default here
 const openaiBaseUrl = config.OPENAI_BASE_URL
@@ -117,6 +137,12 @@ if (openaiBaseUrl) {
 						providers: z
 							.array(z.object({ supports_tools: z.boolean().optional() }).passthrough())
 							.optional(),
+						architecture: z
+							.object({
+								input_modalities: z.array(z.string()).optional(),
+							})
+							.passthrough()
+							.optional(),
 					})
 				),
 			})
@@ -131,12 +157,20 @@ if (openaiBaseUrl) {
 				const org = m.id.split("/")[0];
 				logoUrl = `https://huggingface.co/api/organizations/${encodeURIComponent(org)}/avatar?redirect=true`;
 			}
+
+			const inputModalities = (m.architecture?.input_modalities ?? []).map((modality) =>
+				modality.toLowerCase()
+			);
+			const supportsImageInput =
+				inputModalities.includes("image") || inputModalities.includes("vision");
 			return {
 				id: m.id,
 				name: m.id,
 				displayName: m.id,
 				logoUrl,
 				providers: m.providers,
+				multimodal: supportsImageInput,
+				multimodalAcceptedMimetypes: supportsImageInput ? ["image/*"] : undefined,
 				endpoints: [
 					{
 						type: "openai" as const,
@@ -144,8 +178,8 @@ if (openaiBaseUrl) {
 						// apiKey will be taken from OPENAI_API_KEY or HF_TOKEN automatically
 					},
 				],
-			} as z.infer<typeof modelConfig>;
-		}) as z.infer<typeof modelConfig>[];
+			} as ModelConfig;
+		}) as ModelConfig[];
 	} catch (e) {
 		logger.error(e, "Failed to load models from OpenAI base URL");
 		throw e;
@@ -157,9 +191,42 @@ if (openaiBaseUrl) {
 	throw new Error("OPENAI_BASE_URL not set");
 }
 
-function getChatPromptRender(
-	m: z.infer<typeof modelConfig>
-): (inputs: ChatTemplateInput) => string {
+let modelOverrides: ModelOverride[] = [];
+const overridesEnv = (Reflect.get(config, "MODELS") as string | undefined) ?? "";
+
+if (overridesEnv.trim()) {
+	try {
+		modelOverrides = z
+			.array(overrideEntrySchema)
+			.parse(JSON5.parse(sanitizeJSONEnv(overridesEnv, "[]")));
+	} catch (error) {
+		logger.error(error, "[models] Failed to parse MODELS overrides");
+	}
+}
+
+if (modelOverrides.length) {
+	const overrideMap = new Map<string, ModelOverride>();
+	for (const override of modelOverrides) {
+		for (const key of [override.id, override.name]) {
+			const trimmed = key?.trim();
+			if (trimmed) overrideMap.set(trimmed, override);
+		}
+	}
+
+	modelsRaw = modelsRaw.map((model) => {
+		const override = overrideMap.get(model.id ?? "") ?? overrideMap.get(model.name ?? "");
+		if (!override) return model;
+
+		const { id, name, ...rest } = override;
+
+		return {
+			...model,
+			...rest,
+		};
+	});
+}
+
+function getChatPromptRender(_m: ModelConfig): (inputs: ChatTemplateInput) => string {
 	// Minimal template to support legacy "completions" flow if ever used.
 	// We avoid any tokenizer/Jinja usage in this build.
 	return ({ messages, preprompt }) => {
@@ -174,7 +241,7 @@ function getChatPromptRender(
 	};
 }
 
-const processModel = async (m: z.infer<typeof modelConfig>) => ({
+const processModel = async (m: ModelConfig) => ({
 	...m,
 	chatPromptRender: await getChatPromptRender(m),
 	id: m.id || m.name,
@@ -190,7 +257,6 @@ const addEndpoint = (m: Awaited<ReturnType<typeof processModel>>) => ({
 		if (!m.endpoints || m.endpoints.length === 0) {
 			throw new Error("No endpoints configured. This build requires OpenAI-compatible endpoints.");
 		}
-
 		// Only support OpenAI-compatible endpoints in this build
 		const endpoint = m.endpoints[0];
 		if (endpoint.type !== "openai") {
@@ -202,18 +268,62 @@ const addEndpoint = (m: Awaited<ReturnType<typeof processModel>>) => ({
 
 const inferenceApiIds: string[] = [];
 
-export const models = await Promise.all(
+const builtModels = await Promise.all(
 	modelsRaw.map((e) =>
 		processModel(e)
 			.then(addEndpoint)
 			.then(async (m) => ({
 				...m,
 				hasInferenceAPI: inferenceApiIds.includes(m.id ?? m.name),
+				// router decoration added later
+				isRouter: false as boolean,
 			}))
 	)
 );
 
-export type ProcessedModel = (typeof models)[number];
+// Inject a synthetic router alias ("Omni") if Arch router is configured
+const archBase = (config.LLM_ROUTER_ARCH_BASE_URL || "").trim();
+const routerLabel = (config.PUBLIC_LLM_ROUTER_DISPLAY_NAME || "Omni").trim() || "Omni";
+const routerLogo = (config.PUBLIC_LLM_ROUTER_LOGO_URL || "").trim();
+const routerAliasId = (config.PUBLIC_LLM_ROUTER_ALIAS_ID || "omni").trim() || "omni";
+
+let decorated = builtModels as any[];
+
+if (archBase) {
+	// Build a minimal model config for the alias
+	const aliasRaw: ModelConfig = {
+		id: routerAliasId,
+		name: routerAliasId,
+		displayName: routerLabel,
+		logoUrl: routerLogo || undefined,
+		preprompt: "",
+		endpoints: [
+			{
+				type: "openai" as const,
+				baseURL: openaiBaseUrl!,
+			},
+		],
+		// Keep the alias visible
+		unlisted: false,
+	} as any;
+
+	const aliasBase = await processModel(aliasRaw);
+	// Create a self-referential ProcessedModel for the router endpoint
+	let aliasModel: any = {};
+	aliasModel = {
+		...aliasBase,
+		isRouter: true,
+		// getEndpoint uses the router wrapper regardless of the endpoints array
+		getEndpoint: async (): Promise<Endpoint> => makeRouterEndpoint(aliasModel),
+	};
+
+	// Put alias first
+	decorated = [aliasModel, ...decorated];
+}
+
+export const models = decorated as typeof builtModels;
+
+export type ProcessedModel = (typeof models)[number] & { isRouter?: boolean };
 
 // super ugly but not sure how to make typescript happier
 export const validModelIdSchema = z.enum(models.map((m) => m.id) as [string, ...string[]]);
@@ -221,12 +331,6 @@ export const validModelIdSchema = z.enum(models.map((m) => m.id) as [string, ...
 export const defaultModel = models[0];
 
 // Models that have been deprecated
-const sanitizeJSONEnv = (val: string, fallback: string) => {
-	const raw = (val ?? "").trim();
-	const unquoted = raw.startsWith("`") && raw.endsWith("`") ? raw.slice(1, -1) : raw;
-	return unquoted || fallback;
-};
-
 export const oldModels = config.OLD_MODELS
 	? z
 			.array(

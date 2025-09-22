@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { base } from "$app/paths";
 	import { page } from "$app/state";
-	import { createEventDispatcher } from "svelte";
 
 	import CarbonCheckmark from "~icons/carbon/checkmark";
 	import CarbonTrashCan from "~icons/carbon/trash-can";
@@ -14,17 +13,14 @@
 	interface Props {
 		conv: ConvSidebar;
 		readOnly?: true;
+		ondeleteConversation?: (id: string) => void;
+		oneditConversationTitle?: (payload: { id: string; title: string }) => void;
 	}
 
-	let { conv, readOnly }: Props = $props();
+	let { conv, readOnly, ondeleteConversation, oneditConversationTitle }: Props = $props();
 
 	let confirmDelete = $state(false);
 	let renameOpen = $state(false);
-
-	const dispatch = createEventDispatcher<{
-		deleteConversation: string;
-		editConversationTitle: { id: string; title: string };
-	}>();
 </script>
 
 <a
@@ -36,10 +32,10 @@
 	class="group flex h-[2.15rem] flex-none items-center gap-1.5 rounded-lg pl-2.5 pr-2 text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700 max-sm:h-10
 		{conv.id === page.params.id ? 'bg-gray-100 dark:bg-gray-700' : ''}"
 >
-	<div class="my-2 flex flex-1 flex-col items-start truncate">
+	<div class="my-2 min-w-0 flex-1 truncate first-letter:uppercase">
 		<span>
 			{#if confirmDelete}
-				<span class="mr-1 font-semibold"> Delete </span>
+				<span class="mr-1 font-semibold"> Delete? </span>
 			{/if}
 			{conv.title}
 		</span>
@@ -65,7 +61,7 @@
 				onclick={(e) => {
 					e.preventDefault();
 					confirmDelete = false;
-					dispatch("deleteConversation", conv.id.toString());
+					ondeleteConversation?.(conv.id.toString());
 				}}
 			>
 				<CarbonCheckmark
@@ -92,7 +88,7 @@
 				onclick={(event) => {
 					event.preventDefault();
 					if (event.shiftKey) {
-						dispatch("deleteConversation", conv.id.toString());
+						ondeleteConversation?.(conv.id.toString());
 					} else {
 						confirmDelete = true;
 					}
@@ -111,10 +107,10 @@
 	<EditConversationModal
 		open={renameOpen}
 		title={conv.title}
-		on:close={() => (renameOpen = false)}
-		on:save={(e) => {
+		onclose={() => (renameOpen = false)}
+		onsave={(payload) => {
 			renameOpen = false;
-			dispatch("editConversationTitle", { id: conv.id.toString(), title: e.detail.title });
+			oneditConversationTitle?.({ id: conv.id.toString(), title: payload.title });
 		}}
 	/>
 {/if}

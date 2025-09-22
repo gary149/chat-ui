@@ -1,14 +1,11 @@
 <script lang="ts">
-	import { createBubbler } from "svelte/legacy";
-
-	const bubble = createBubbler();
 	import type { Message, MessageFile } from "$lib/types/Message";
-	import { createEventDispatcher, onDestroy, tick } from "svelte";
+	import { onDestroy, tick } from "svelte";
 
+	import IconOmni from "$lib/components/icons/IconOmni.svelte";
 	import CarbonExport from "~icons/carbon/export";
 	import CarbonCaretDown from "~icons/carbon/caret-down";
-
-	import EosIconsLoading from "~icons/eos-icons/loading";
+	import CarbonDirectionRight from "~icons/carbon/direction-right-01";
 
 	import ChatInput from "./ChatInput.svelte";
 	import StopGeneratingBtn from "../StopGeneratingBtn.svelte";
@@ -30,6 +27,8 @@
 	import UploadedFile from "./UploadedFile.svelte";
 	import { useSettingsStore } from "$lib/stores/settings";
 	import ModelSwitch from "./ModelSwitch.svelte";
+	import { routerExamples } from "$lib/constants/routerExamples";
+	import type { RouterFollowUp, RouterExample } from "$lib/constants/routerExamples";
 
 	import { fly } from "svelte/transition";
 	import { cubicInOut } from "svelte/easing";
@@ -47,6 +46,11 @@
 		models: Model[];
 		preprompt?: string | undefined;
 		files?: File[];
+		onmessage?: (content: string) => void;
+		onstop?: () => void;
+		onretry?: (payload: { id: Message["id"]; content?: string }) => void;
+		oncontinue?: (payload: { id: Message["id"] }) => void;
+		onshowAlternateMsg?: (payload: { id: Message["id"] }) => void;
 	}
 
 	let {
@@ -59,6 +63,11 @@
 		models,
 		preprompt = undefined,
 		files = $bindable([]),
+		onmessage,
+		onstop,
+		onretry,
+		oncontinue,
+		onshowAlternateMsg,
 	}: Props = $props();
 
 	let isReadOnly = $derived(!models.some((model) => model.id === currentModel.id));
@@ -68,16 +77,9 @@
 	let editMsdgId: Message["id"] | null = $state(null);
 	let pastedLongContent = $state(false);
 
-	const dispatch = createEventDispatcher<{
-		message: string;
-		stop: void;
-		retry: { id: Message["id"]; content?: string };
-		continue: { id: Message["id"] };
-	}>();
-
 	const handleSubmit = () => {
 		if (loading) return;
-		dispatch("message", message);
+		onmessage?.(message);
 		message = "";
 	};
 
@@ -136,12 +138,56 @@
 	};
 
 	let lastMessage = $derived(browser && (messages.at(-1) as Message));
+	let scrollSignal = $derived.by(() => {
+		const last = messages.at(-1) as Message | undefined;
+		return last ? `${last.id}:${last.content.length}:${messages.length}` : `${messages.length}:0`;
+	});
 	let lastIsError = $derived(
 		lastMessage &&
 			!loading &&
 			(lastMessage.from === "user" ||
 				lastMessage.updates?.findIndex((u) => u.type === "status" && u.status === "error") !== -1)
 	);
+
+	let streamingAssistantMessage = $derived(
+		(() => {
+			for (let i = messages.length - 1; i >= 0; i -= 1) {
+				const candidate = messages[i];
+				if (candidate.from === "assistant") {
+					return candidate;
+				}
+			}
+			return undefined;
+		})()
+	);
+	let streamingRouterMetadata = $derived(streamingAssistantMessage?.routerMetadata ?? null);
+	let streamingRouterModelName = $derived(
+		streamingRouterMetadata?.model
+			? (streamingRouterMetadata.model.split("/").pop() ?? streamingRouterMetadata.model)
+			: ""
+	);
+	let showRouterDetails = $state(false);
+	let routerDetailsTimeout: ReturnType<typeof setTimeout> | undefined;
+
+	$effect(() => {
+		if (!currentModel.isRouter || !loading) {
+			showRouterDetails = false;
+			if (routerDetailsTimeout) {
+				clearTimeout(routerDetailsTimeout);
+				routerDetailsTimeout = undefined;
+			}
+			return;
+		}
+
+		if (routerDetailsTimeout) {
+			clearTimeout(routerDetailsTimeout);
+		}
+
+		showRouterDetails = false;
+		routerDetailsTimeout = setTimeout(() => {
+			showRouterDetails = true;
+		}, 1000);
+	});
 
 	let sources = $derived(
 		files?.map<Promise<MessageFile>>((file) =>
@@ -158,7 +204,11 @@
 		shareModalOpen = true;
 	}
 
-	onDestroy(() => {});
+	onDestroy(() => {
+		if (routerDetailsTimeout) {
+			clearTimeout(routerDetailsTimeout);
+		}
+	});
 
 	let chatContainer: HTMLElement | undefined = $state();
 
@@ -176,11 +226,11 @@
 	});
 
 	const settings = useSettingsStore();
+	let hideRouterExamples = $derived($settings.hidePromptExamples?.[currentModel.id] ?? false);
 
 	// Respect per‑model multimodal toggle from settings (force enable)
-	let modelIsMultimodal = $derived(
-		currentModel.multimodal || ($settings.multimodalOverrides?.[currentModel.id] ?? false)
-	);
+	let modelIsMultimodalOverride = $derived($settings.multimodalOverrides?.[currentModel.id]);
+	let modelIsMultimodal = $derived((modelIsMultimodalOverride ?? currentModel.multimodal) === true);
 	let activeMimeTypes = $derived(
 		Array.from(
 			new Set([
@@ -190,6 +240,58 @@
 	);
 	let isFileUploadEnabled = $derived(activeMimeTypes.length > 0);
 	let focused = $state(false);
+
+	let activeRouterExamplePrompt = $state<string | null>(null);
+	let routerFollowUps = $derived<RouterFollowUp[]>(
+		activeRouterExamplePrompt
+			? (routerExamples.find((ex) => ex.prompt === activeRouterExamplePrompt)?.followUps ?? [])
+			: []
+	);
+	let routerUserMessages = $derived(messages.filter((msg) => msg.from === "user"));
+	let shouldShowRouterFollowUps = $derived(
+		!message.length &&
+			activeRouterExamplePrompt &&
+			routerFollowUps.length > 0 &&
+			routerUserMessages.length === 1 &&
+			currentModel.isRouter &&
+			!hideRouterExamples &&
+			!loading
+	);
+
+	$effect(() => {
+		if (!currentModel.isRouter || !messages.length) {
+			activeRouterExamplePrompt = null;
+			return;
+		}
+
+		const firstUserMessage = messages.find((msg) => msg.from === "user");
+		if (!firstUserMessage) {
+			activeRouterExamplePrompt = null;
+			return;
+		}
+
+		const match = routerExamples.find((ex) => ex.prompt.trim() === firstUserMessage.content.trim());
+		activeRouterExamplePrompt = match ? match.prompt : null;
+	});
+
+	function triggerPrompt(prompt: string) {
+		if (loading) return;
+		if (page.data.loginRequired) {
+			$loginModalOpen = true;
+			return;
+		}
+		message = prompt;
+		handleSubmit();
+	}
+
+	function startExample(example: RouterExample) {
+		activeRouterExamplePrompt = example.prompt;
+		triggerPrompt(example.prompt);
+	}
+
+	function startFollowUp(followUp: RouterFollowUp) {
+		triggerPrompt(followUp.prompt);
+	}
 </script>
 
 <svelte:window
@@ -197,7 +299,6 @@
 	ondragleave={onDragLeave}
 	ondragover={(e) => {
 		e.preventDefault();
-		bubble("dragover");
 	}}
 	ondrop={(e) => {
 		e.preventDefault();
@@ -207,11 +308,11 @@
 
 <div class="relative z-[-1] min-h-0 min-w-0">
 	{#if shareModalOpen}
-		<ShareConversationModal open={shareModalOpen} on:close={() => (shareModalOpen = false)} />
+		<ShareConversationModal open={shareModalOpen} onclose={() => (shareModalOpen = false)} />
 	{/if}
 	<div
 		class="scrollbar-custom h-full overflow-y-auto"
-		use:snapScrollToBottom={messages.map((message) => message.content)}
+		use:snapScrollToBottom={scrollSignal}
 		bind:this={chatContainer}
 	>
 		<div
@@ -232,9 +333,8 @@
 							readOnly={isReadOnly}
 							isLast={idx === messages.length - 1}
 							bind:editMsdgId
-							on:retry
-							on:continue
-							on:showAlternateMsg
+							onretry={(payload) => onretry?.(payload)}
+							onshowAlternateMsg={(payload) => onshowAlternateMsg?.(payload)}
 						/>
 					{/each}
 					{#if isReadOnly}
@@ -256,12 +356,11 @@
 			{:else}
 				<ChatIntroduction
 					{currentModel}
-					on:message={(ev) => {
+					onmessage={(content) => {
 						if (page.data.loginRequired) {
-							ev.preventDefault();
 							$loginModalOpen = true;
 						} else {
-							dispatch("message", ev.detail);
+							onmessage?.(content);
 						}
 					}}
 				/>
@@ -278,6 +377,7 @@
 			scrollNode={chatContainer}
 		/>
 	</div>
+
 	<div
 		class="pointer-events-none absolute inset-x-0 bottom-0 z-0 mx-auto flex w-full
 			max-w-3xl flex-col items-center justify-center bg-gradient-to-t from-white
@@ -285,6 +385,34 @@
 			dark:from-gray-900 dark:via-gray-900/100
 			dark:to-gray-900/0 max-sm:py-0 sm:px-5 md:pb-4 xl:max-w-4xl [&>*]:pointer-events-auto"
 	>
+		{#if !message.length && !messages.length && !sources.length && !loading && currentModel.isRouter && routerExamples.length && !hideRouterExamples}
+			<div
+				class="mb-3 flex w-full select-none justify-start gap-2 overflow-x-auto whitespace-nowrap text-gray-400 [scrollbar-width:none;] dark:text-gray-500"
+			>
+				{#each routerExamples as ex}
+					<button
+						class="flex items-center rounded-lg bg-gray-100/90 px-2 py-0.5 text-center text-sm backdrop-blur hover:text-gray-500 dark:bg-gray-700/50 dark:hover:text-gray-400"
+						onclick={() => startExample(ex)}>{ex.title}</button
+					>
+				{/each}
+			</div>
+		{/if}
+		{#if shouldShowRouterFollowUps}
+			<div
+				class="mb-3 flex w-full select-none justify-start gap-2 overflow-x-auto whitespace-nowrap text-gray-400 [scrollbar-width:none;] dark:text-gray-500"
+			>
+				<!-- <span class=" text-gray-500 dark:text-gray-400">Follow ups</span> -->
+				{#each routerFollowUps as followUp}
+					<button
+						class="flex items-center gap-1 rounded-lg bg-gray-100/90 px-2 py-0.5 text-center text-sm backdrop-blur hover:text-gray-500 dark:bg-gray-700/50 dark:hover:text-gray-400"
+						onclick={() => startFollowUp(followUp)}
+					>
+						<CarbonDirectionRight class="scale-y-[-1] text-xs" />
+						{followUp.title}</button
+					>
+				{/each}
+			</div>
+		{/if}
 		{#if sources?.length && !loading}
 			<div
 				in:fly|local={sources.length === 1 ? { y: -20, easing: cubicInOut } : undefined}
@@ -294,7 +422,7 @@
 					{#await source then src}
 						<UploadedFile
 							file={src}
-							on:close={() => {
+							onclose={() => {
 								files = files.filter((_, i) => i !== index);
 							}}
 						/>
@@ -305,31 +433,31 @@
 
 		<div class="w-full">
 			<div class="flex w-full *:mb-3">
-				{#if loading}
-					<StopGeneratingBtn classNames="ml-auto" onClick={() => dispatch("stop")} />
-				{:else if lastIsError}
-					<RetryBtn
-						classNames="ml-auto"
-						onClick={() => {
-							if (lastMessage && lastMessage.ancestors) {
-								dispatch("retry", {
-									id: lastMessage.id,
-								});
-							}
-						}}
-					/>
-				{:else if messages && lastMessage && lastMessage.interrupted && !isReadOnly}
-					<div class="ml-auto gap-2">
-						<ContinueBtn
+				{#if !loading}
+					{#if lastIsError}
+						<RetryBtn
+							classNames="ml-auto"
 							onClick={() => {
 								if (lastMessage && lastMessage.ancestors) {
-									dispatch("continue", {
-										id: lastMessage?.id,
+									onretry?.({
+										id: lastMessage.id,
 									});
 								}
 							}}
 						/>
-					</div>
+					{:else if messages && lastMessage && lastMessage.interrupted && !isReadOnly}
+						<div class="ml-auto gap-2">
+							<ContinueBtn
+								onClick={() => {
+									if (lastMessage && lastMessage.ancestors) {
+										oncontinue?.({
+											id: lastMessage?.id,
+										});
+									}
+								}}
+							/>
+						</div>
+					{/if}
 				{/if}
 			</div>
 			<form
@@ -361,7 +489,7 @@
 								bind:value={message}
 								bind:files
 								mimeTypes={activeMimeTypes}
-								on:submit={handleSubmit}
+								onsubmit={handleSubmit}
 								{onPaste}
 								disabled={isReadOnly || lastIsError}
 								{modelIsMultimodal}
@@ -370,12 +498,11 @@
 						{/if}
 
 						{#if loading}
-							<button
-								disabled
-								class="btn absolute bottom-0.5 right-0.5 size-10 self-end rounded-lg bg-transparent text-gray-400"
-							>
-								<EosIconsLoading />
-							</button>
+							<StopGeneratingBtn
+								onClick={() => onstop?.()}
+								showBorder={true}
+								classNames="absolute bottom-2 right-2 size-7 self-end rounded-full border bg-white text-black shadow transition-none dark:border-transparent dark:bg-gray-600 dark:text-white"
+							/>
 						{:else}
 							<button
 								class="btn absolute bottom-2 right-2 size-7 self-end rounded-full border bg-white text-black shadow transition-none enabled:hover:bg-white enabled:hover:shadow-inner dark:border-transparent dark:bg-gray-600 dark:text-white dark:hover:enabled:bg-black {!message ||
@@ -408,29 +535,59 @@
 			</form>
 			<div
 				class={{
-					"mt-2 flex justify-between self-stretch px-1 text-xs text-gray-400/90 max-md:mb-2 max-sm:gap-2": true,
+					"mt-2 flex self-stretch px-0.5 text-xs text-gray-400/90 max-md:mb-2 max-sm:gap-2": true,
 					"max-sm:hidden": focused && isVirtualKeyboard(),
 				}}
 			>
-				<p>
-					Model:
-					{#if models.find((m) => m.id === currentModel.id)}
+				{#if models.find((m) => m.id === currentModel.id)}
+					{#if !currentModel.isRouter || !loading}
 						<a
 							href="{base}/settings/{currentModel.id}"
-							class="inline-flex items-center hover:underline"
-							>{currentModel.displayName}<CarbonCaretDown class="text-xxs" /></a
+							class="inline-flex items-center gap-1 hover:underline"
 						>
+							{#if currentModel.isRouter}
+								<IconOmni />
+								{currentModel.displayName}
+							{:else}
+								Model: {currentModel.displayName}
+							{/if}
+							<CarbonCaretDown class="-ml-0.5 text-xxs" />
+						</a>
+					{:else if showRouterDetails && streamingRouterMetadata}
+						<div
+							class="mr-2 flex items-center gap-1.5 whitespace-nowrap text-[.70rem] text-xs leading-none text-gray-400 dark:text-gray-400"
+						>
+							<IconOmni classNames="text-xs animate-pulse" />
+
+							<span class="router-badge-text router-shimmer">
+								{streamingRouterMetadata.route}
+							</span>
+
+							<span class="text-gray-500">with</span>
+
+							<span class="router-badge-text">
+								{streamingRouterModelName}
+							</span>
+						</div>
 					{:else}
-						<span class="inline-flex items-center line-through dark:border-gray-700">
-							{currentModel.id}
-						</span>
+						<div
+							class="loading-dots relative inline-flex items-center text-gray-400 dark:text-gray-400"
+							aria-label="Routing…"
+						>
+							<IconOmni classNames="text-xs animate-pulse mr-1" /> Routing
+						</div>
 					{/if}
-					<span class="max-sm:hidden">·</span><br class="sm:hidden" /> Generated content may be inaccurate
-					or false.
-				</p>
+				{:else}
+					<span class="inline-flex items-center line-through dark:border-gray-700">
+						{currentModel.id}
+					</span>
+				{/if}
+				{#if !messages.length}
+					<span class="ml-2">Generated content may be inaccurate or false.</span>
+				{/if}
 				{#if messages.length}
 					<button
-						class="flex flex-none items-center hover:text-gray-400 max-sm:rounded-lg max-sm:bg-gray-50 max-sm:px-2.5 dark:max-sm:bg-gray-800"
+						class="ml-auto flex flex-none items-center hover:text-gray-400 max-sm:rounded-lg max-sm:bg-gray-50 max-sm:px-2.5 dark:max-sm:bg-gray-800"
 						type="button"
 						onclick={onShare}
 					>
@@ -458,6 +615,67 @@
 		}
 		100% {
 			box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
+		}
+	}
+
+	.router-badge-text {
+		display: inline-block;
+		position: relative;
+		color: inherit;
+	}
+
+	.router-shimmer {
+		display: inline-block;
+		background-image: linear-gradient(
+			90deg,
+			rgba(156, 163, 175, 1) 0%,
+			rgba(156, 163, 175, 0.6) 10%,
+			rgba(156, 163, 175, 0.6) 50%,
+			rgba(156, 163, 175, 0.6) 90%,
+			rgba(156, 163, 175, 1) 100%
+		);
+		background-size: 220% 100%;
+		animation: router-shimmer 2.8s linear infinite;
+		background-clip: text;
+		-webkit-background-clip: text;
+		color: transparent;
+		-webkit-text-fill-color: transparent;
+	}
+
+	:global(.dark) .router-shimmer {
+		background-image: linear-gradient(
+			90deg,
+			rgba(255, 255, 255, 0.15) 0%,
+			rgba(255, 255, 255, 0.7) 50%,
+			rgba(255, 255, 255, 0.15) 100%
+		);
+	}
+
+	@keyframes router-shimmer {
+		0% {
+			background-position: 200% 0;
+		}
+		100% {
+			background-position: -200% 0;
+		}
+	}
+
+	.loading-dots::after {
+		content: "";
+		animation: dots-content 0.9s steps(1, end) infinite;
+	}
+	@keyframes dots-content {
+		0% {
+			content: "";
+		}
+		33% {
+			content: ".";
+		}
+		66% {
+			content: "..";
+		}
+		88% {
+			content: "...";
 		}
 	}
 </style>

@@ -5,7 +5,6 @@ import { collections } from "$lib/server/database";
 import { authCondition } from "$lib/server/auth";
 import { models, validateModel } from "$lib/server/models";
 import { DEFAULT_SETTINGS, type SettingsEditable } from "$lib/types/Settings";
-import { ObjectId } from "mongodb";
 import { z } from "zod";
 
 export const userGroup = new Elysia()
@@ -60,12 +59,13 @@ export const userGroup = new Elysia()
 
 				// todo: get user settings
 				return {
-					ethicsModalAccepted: !!settings?.ethicsModalAcceptedAt,
-					ethicsModalAcceptedAt: settings?.ethicsModalAcceptedAt ?? null,
+					welcomeModalSeen: !!settings?.welcomeModalSeenAt,
+					welcomeModalSeenAt: settings?.welcomeModalSeenAt ?? null,
 
 					activeModel: settings?.activeModel ?? DEFAULT_SETTINGS.activeModel,
 					disableStream: settings?.disableStream ?? DEFAULT_SETTINGS.disableStream,
 					directPaste: settings?.directPaste ?? DEFAULT_SETTINGS.directPaste,
+					hidePromptExamples: settings?.hidePromptExamples ?? DEFAULT_SETTINGS.hidePromptExamples,
 					shareConversationsWithModelAuthors:
 						settings?.shareConversationsWithModelAuthors ??
 						DEFAULT_SETTINGS.shareConversationsWithModelAuthors,
@@ -77,17 +77,18 @@ export const userGroup = new Elysia()
 			.post("/settings", async ({ locals, request }) => {
 				const body = await request.json();
 
-				const { ethicsModalAccepted, ...settings } = z
+				const { welcomeModalSeen, ...settings } = z
 					.object({
 						shareConversationsWithModelAuthors: z
 							.boolean()
 							.default(DEFAULT_SETTINGS.shareConversationsWithModelAuthors),
-						ethicsModalAccepted: z.boolean().optional(),
+						welcomeModalSeen: z.boolean().optional(),
 						activeModel: z.string().default(DEFAULT_SETTINGS.activeModel),
 						customPrompts: z.record(z.string()).default({}),
 						multimodalOverrides: z.record(z.boolean()).default({}),
 						disableStream: z.boolean().default(false),
 						directPaste: z.boolean().default(false),
+						hidePromptExamples: z.record(z.boolean()).default({}),
 					})
 					.parse(body) satisfies SettingsEditable;
 
@@ -98,7 +99,7 @@ export const userGroup = new Elysia()
 					{
 						$set: {
 							...settings,
-							...(ethicsModalAccepted && { ethicsModalAcceptedAt: new Date() }),
+							...(welcomeModalSeen && { welcomeModalSeenAt: new Date() }),
 							updatedAt: new Date(),
 						},
 						$setOnInsert: {

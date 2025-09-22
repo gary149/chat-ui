@@ -1,8 +1,4 @@
 <script lang="ts">
-	import { createBubbler } from "svelte/legacy";
-
-	const bubble = createBubbler();
-	import { useSettingsStore } from "$lib/stores/settings";
 	import CarbonImage from "~icons/carbon/image";
 
 	interface Props {
@@ -19,8 +15,6 @@
 		onDrag = $bindable(false),
 		onDragInner = $bindable(false),
 	}: Props = $props();
-
-	const settings = useSettingsStore();
 
 	async function dropHandle(event: DragEvent) {
 		event.preventDefault();
@@ -87,7 +81,6 @@
 	ondragleave={() => (onDragInner = false)}
 	ondragover={(e) => {
 		e.preventDefault();
-		bubble("dragover");
 	}}
 	class="relative flex h-28 w-full max-w-4xl flex-col items-center justify-center gap-1 rounded-xl border-2 border-dotted {onDragInner
 		? 'border-blue-200 !bg-blue-500/10 text-blue-600 *:pointer-events-none dark:border-blue-600 dark:bg-blue-500/20 dark:text-blue-500'

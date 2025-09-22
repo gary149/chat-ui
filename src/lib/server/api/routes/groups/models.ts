@@ -15,7 +15,7 @@ export type GETModelsResponse = Array<{
 	description?: string;
 	reasoning: boolean;
 	logoUrl?: string;
-    providers?: Array<{ provider: string } & Record<string, unknown>>;
+	providers?: Array<{ provider: string } & Record<string, unknown>>;
 	promptExamples?: { title: string; prompt: string }[];
 	parameters: BackendModel["parameters"];
 	preprompt?: string;
@@ -23,6 +23,8 @@ export type GETModelsResponse = Array<{
 	multimodalAcceptedMimetypes?: string[];
 	unlisted: boolean;
 	hasInferenceAPI: boolean;
+	// Mark router entry for UI decoration — always present
+	isRouter: boolean;
 }>;
 
 export type GETOldModelsResponse = Array<{
@@ -49,8 +51,10 @@ export const modelGroup = new Elysia().group("/models", (app) =>
 						displayName: model.displayName,
 						description: model.description,
 						reasoning: !!model.reasoning,
-                    logoUrl: model.logoUrl,
-                    providers: (model.providers as unknown as Array<{ provider: string } & Record<string, unknown>>),
+						logoUrl: model.logoUrl,
+						providers: model.providers as unknown as Array<
+							{ provider: string } & Record<string, unknown>
+						>,
 						promptExamples: model.promptExamples,
 						parameters: model.parameters,
 						preprompt: model.preprompt,
@@ -58,6 +62,7 @@ export const modelGroup = new Elysia().group("/models", (app) =>
 						multimodalAcceptedMimetypes: model.multimodalAcceptedMimetypes,
 						unlisted: model.unlisted,
 						hasInferenceAPI: model.hasInferenceAPI,
+						isRouter: model.isRouter,
 					})) satisfies GETModelsResponse;
 			} catch (e) {
 				// Return empty list instead of crashing the whole page
