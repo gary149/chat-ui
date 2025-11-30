@@ -27,7 +27,7 @@
 		scrollNode?.removeEventListener("scroll", updateVisibility);
 	}
 
-	const cleanup = $effect.root(() => {
+	$effect.root(() => {
 		$effect(() => {
 			if (scrollNode) {
 				if (typeof ResizeObserver !== "undefined") {
