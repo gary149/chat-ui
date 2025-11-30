@@ -3,9 +3,12 @@
 	import { onDestroy, untrack } from "svelte";
 	import IconChevron from "./icons/IconChevron.svelte";
 
+	// Threshold for showing the button - consistent with ScrollToBottomBtn
+	const VISIBILITY_THRESHOLD = 100;
+
 	let visible = $state(false);
 	interface Props {
-		scrollNode: HTMLElement;
+		scrollNode: HTMLElement | undefined;
 		class?: string;
 	}
 
@@ -14,9 +17,9 @@
 
 	function updateVisibility() {
 		if (!scrollNode) return;
-		visible =
-			Math.ceil(scrollNode.scrollTop) + 200 < scrollNode.scrollHeight - scrollNode.clientHeight &&
-			scrollNode.scrollTop > 200;
+		const { scrollTop, scrollHeight, clientHeight } = scrollNode;
+		// Show when scrolled up more than threshold AND not at the very top
+		visible = scrollHeight - scrollTop - clientHeight > VISIBILITY_THRESHOLD && scrollTop > 100;
 	}
 
 	function scrollToPrevious() {
@@ -54,13 +57,20 @@
 				if (scrollNode) {
 					destroy();
 
-					if (window.ResizeObserver) {
+					if (typeof ResizeObserver !== "undefined") {
 						observer = new ResizeObserver(() => {
 							updateVisibility();
 						});
 						observer.observe(scrollNode);
+						// Also observe content for size changes
+						const contentWrapper = scrollNode.firstElementChild;
+						if (contentWrapper) {
+							observer.observe(contentWrapper);
+						}
 					}
-					scrollNode.addEventListener("scroll", updateVisibility);
+					scrollNode.addEventListener("scroll", updateVisibility, { passive: true });
+					// Initial visibility check
+					updateVisibility();
 				}
 			});
 	});
