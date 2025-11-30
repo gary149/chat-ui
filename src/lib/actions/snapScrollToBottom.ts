@@ -3,8 +3,8 @@ import { tick } from "svelte";
 
 // Threshold for considering user "at bottom" - generous to handle small layout shifts
 const BOTTOM_THRESHOLD = 50;
-// Minimum scroll distance to consider intentional user scrolling up
-const SCROLL_UP_THRESHOLD = 30;
+// Minimum scroll distance to consider intentional user scrolling up (low to allow easy detachment)
+const SCROLL_UP_THRESHOLD = 5;
 
 /**
  * Checks if the scroll container is at or near the bottom
@@ -29,6 +29,9 @@ export const snapScrollToBottom = (node: HTMLElement, dependency: unknown) => {
 	let isProgrammaticScroll = false;
 	// ResizeObserver to watch for content height changes
 	let resizeObserver: ResizeObserver | null = null;
+	// Track recent user scroll activity to avoid fighting with user input
+	let lastUserScrollTime = 0;
+	const USER_SCROLL_COOLDOWN = 150; // ms to wait after user scroll before auto-scrolling
 
 	const scrollToBottom = () => {
 		isProgrammaticScroll = true;
@@ -51,6 +54,11 @@ export const snapScrollToBottom = (node: HTMLElement, dependency: unknown) => {
 		const scrollDelta = currentScrollTop - prevScrollTop;
 		const contentGrew = node.scrollHeight > prevScrollHeight;
 
+		// Record any user scroll activity (for cooldown mechanism)
+		if (Math.abs(scrollDelta) > 1) {
+			lastUserScrollTime = Date.now();
+		}
+
 		// If content grew while we were at the bottom, stay attached
 		if (contentGrew && !isUserDetached) {
 			prevScrollTop = currentScrollTop;
@@ -58,7 +66,7 @@ export const snapScrollToBottom = (node: HTMLElement, dependency: unknown) => {
 			return;
 		}
 
-		// User scrolled up significantly - detach
+		// User scrolled up - detach (low threshold for responsive feel)
 		if (scrollDelta < -SCROLL_UP_THRESHOLD) {
 			isUserDetached = true;
 		}
@@ -73,10 +81,18 @@ export const snapScrollToBottom = (node: HTMLElement, dependency: unknown) => {
 	};
 
 	const handleContentResize = () => {
-		// If user is not detached and we're at/near bottom, scroll to stay at bottom
+		// If user is not detached, scroll to stay at bottom
 		if (!isUserDetached) {
 			// Use requestAnimationFrame to batch with browser's layout
 			requestAnimationFrame(() => {
+				// Don't auto-scroll if user was recently scrolling (avoid fighting with user input)
+				const timeSinceUserScroll = Date.now() - lastUserScrollTime;
+				if (timeSinceUserScroll < USER_SCROLL_COOLDOWN) {
+					prevScrollHeight = node.scrollHeight;
+					return;
+				}
+
+				// Only scroll if still not detached and not already at bottom
 				if (!isUserDetached && !isAtBottom(node)) {
 					scrollToBottom();
 				}
