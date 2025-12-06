@@ -12,6 +12,7 @@ import type { ConversationStats } from "$lib/types/ConversationStats";
 import type { MigrationResult } from "$lib/types/MigrationResult";
 import type { Semaphore } from "$lib/types/Semaphore";
 import type { AssistantStats } from "$lib/types/AssistantStats";
+import type { SkillSettings } from "$lib/types/Skill";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import { logger } from "$lib/server/logger";
 import { building } from "$app/environment";
@@ -131,6 +132,7 @@ export class Database {
 		const tokenCaches = db.collection<TokenCache>("tokens");
 		const tools = db.collection("tools");
 		const configCollection = db.collection<ConfigKey>("config");
+		const skillSettings = db.collection<SkillSettings>("skillSettings");
 
 		return {
 			conversations,
@@ -150,6 +152,7 @@ export class Database {
 			tokenCaches,
 			tools,
 			config: configCollection,
+			skillSettings,
 		};
 	}
 
@@ -173,6 +176,7 @@ export class Database {
 			semaphores,
 			tokenCaches,
 			config,
+			skillSettings,
 		} = this.getCollections();
 
 		conversations
@@ -286,6 +290,14 @@ export class Database {
 			.catch((e) => logger.error(e));
 
 		config.createIndex({ key: 1 }, { unique: true }).catch((e) => logger.error(e));
+
+		// Skill settings indexes
+		skillSettings
+			.createIndex({ userId: 1 }, { unique: true, sparse: true })
+			.catch((e) => logger.error(e));
+		skillSettings
+			.createIndex({ sessionId: 1 }, { unique: true, sparse: true })
+			.catch((e) => logger.error(e));
 	}
 }
 

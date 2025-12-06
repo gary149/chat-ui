@@ -9,6 +9,7 @@ import {
 import { generate } from "./generate";
 import { mergeAsyncGenerators } from "$lib/utils/mergeAsyncGenerators";
 import type { TextGenerationContext } from "./types";
+import { enhancePrepromptWithSkills } from "../skills";
 
 async function* keepAlive(done: AbortSignal): AsyncGenerator<MessageUpdate, undefined, undefined> {
 	while (!done.aborted) {
@@ -41,12 +42,19 @@ async function* textGenerationWithoutTitle(
 		status: MessageUpdateStatus.Started,
 	};
 
-	const { conv, messages } = ctx;
+	const { conv, messages, userId, sessionId } = ctx;
 	const convId = conv._id;
 
-	const preprompt = conv.preprompt;
+	// Enhance preprompt with skills if enabled
+	const { enhancedPreprompt } = await enhancePrepromptWithSkills(
+		conv.preprompt,
+		conv,
+		messages,
+		userId,
+		sessionId
+	);
 
 	const processedMessages = await preprocessMessages(messages, convId);
-	yield* generate({ ...ctx, messages: processedMessages }, preprompt);
+	yield* generate({ ...ctx, messages: processedMessages }, enhancedPreprompt);
 	done.abort();
 }

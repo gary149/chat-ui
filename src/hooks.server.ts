@@ -13,6 +13,7 @@ import { initExitHandler } from "$lib/server/exitHandler";
 import { refreshConversationStats } from "$lib/jobs/refresh-conversation-stats";
 import { adminTokenManager } from "$lib/server/adminToken";
 import { isHostLocalhost } from "$lib/server/isURLLocal";
+import { initializeSkillRegistry } from "$lib/server/skills";
 
 export const init: ServerInit = async () => {
 	// Wait for config to be fully loaded
@@ -43,6 +44,12 @@ export const init: ServerInit = async () => {
 		AbortedGenerations.getInstance();
 
 		adminTokenManager.displayToken();
+
+		// Initialize the skill registry
+		if (config.ENABLE_SKILLS === "true") {
+			await initializeSkillRegistry();
+			logger.info("Skill registry initialized");
+		}
 
 		if (config.EXPOSE_API) {
 			logger.warn(

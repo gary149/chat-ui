@@ -16,4 +16,8 @@ export interface TextGenerationContext {
 	username?: string;
 	/** Force-enable multimodal handling for endpoints that support it */
 	forceMultimodal?: boolean;
+	/** User ID for skill settings lookup */
+	userId?: string;
+	/** Session ID for skill settings lookup (guest users) */
+	sessionId?: string;
 }
