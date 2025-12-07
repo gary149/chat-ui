@@ -20,6 +20,26 @@
 
 			// For some reason, Sveltekit doesn't let us load env variables from .env here, so we load it from hooks.server.ts
 			window.gaId = "%gaId%";
+
+			// Disable pinch zoom on iOS Safari (viewport meta is ignored since iOS 10)
+			document.addEventListener("gesturestart", function (e) {
+				e.preventDefault();
+			});
+			document.addEventListener("gesturechange", function (e) {
+				e.preventDefault();
+			});
+			document.addEventListener("gestureend", function (e) {
+				e.preventDefault();
+			});
+			window.addEventListener(
+				"touchmove",
+				function (e) {
+					if (e.scale !== 1) {
+						e.preventDefault();
+					}
+				},
+				{ passive: false }
+			);
 		</script>
 		%sveltekit.head%
 	</head>
