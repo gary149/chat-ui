@@ -40,9 +40,10 @@
 <svelte:head>
 	{#if publicConfig.isHuggingChat}
 		<title>HuggingChat - Models</title>
+		<meta name="description" content={publicConfig.PUBLIC_APP_DESCRIPTION} />
 		<meta property="og:title" content="HuggingChat - Models" />
-		<meta property="og:type" content="link" />
-		<meta property="og:description" content="Browse HuggingChat available models" />
+		<meta property="og:type" content="website" />
+		<meta property="og:description" content={publicConfig.PUBLIC_APP_DESCRIPTION} />
 		<meta property="og:url" content={page.url.href} />
 	{/if}
 </svelte:head>

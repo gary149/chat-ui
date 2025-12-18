@@ -126,7 +126,14 @@
 </script>
 
 <svelte:head>
-	<title>{publicConfig.PUBLIC_APP_NAME}</title>
+	{#if publicConfig.isHuggingChat}
+		<title>HuggingChat</title>
+		<meta name="description" content={publicConfig.PUBLIC_APP_DESCRIPTION} />
+		<meta property="og:title" content="HuggingChat" />
+		<meta property="og:description" content={publicConfig.PUBLIC_APP_DESCRIPTION} />
+	{:else}
+		<title>{publicConfig.PUBLIC_APP_NAME}</title>
+	{/if}
 </svelte:head>
 
 {#if hasModels}
